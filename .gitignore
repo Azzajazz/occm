@@ -1,0 +1,4 @@
+*.swp
+*.exe
+*.pdb
+*/__pycache__
