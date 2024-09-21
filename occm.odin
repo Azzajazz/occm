@@ -48,12 +48,19 @@ Token :: struct {
     data: Token_Data,
 }
 
+lex_error :: proc(c: u8) {
+    fmt.printfln("Unexpected token: %c", c)
+    os.exit(2)
+}
+
 get_int_constant_token :: proc(input: string) -> (token: Token, rest: string) {
     byte_index: int
 
     for byte_index = 0; byte_index < len(input); byte_index += 1 {
         if !is_ascii_digit_byte(input[byte_index]) do break
     }
+
+    if is_ascii_alpha_byte(input[byte_index]) do lex_error(input[byte_index])
 
     data := strconv.atoi(input[:byte_index])
     return Token{.IntConstant, input[:byte_index], data}, input[byte_index:]
@@ -154,9 +161,16 @@ lex :: proc(code: string) -> [dynamic]Token {
 
             case '/':
                 if code[1] == '/' {
+                    // Single line comments
                     i := 2
                     for code[i] != '\n' do i += 1
                     code = code[i + 1:]
+                }
+                else if code[1] == '*' {
+                    // Multi-line comments
+                    i := 2
+                    for code[i] != '*' || code[i + 1] != '/' do i += 1
+                    code = code[i + 2:]
                 }
                 else {
                     append(&tokens, Token{.ForwardSlash, code[:1], {}})
@@ -249,20 +263,28 @@ lex :: proc(code: string) -> [dynamic]Token {
             append(&tokens, token)
         }
         else {
-            fmt.eprintln(code)
-            assert(false, "Could not tokenize symbol!")
+            lex_error(code[0]);
         }
     }
 
     return tokens
 }
 
+take_first_token :: proc(tokens: []Token) -> (token: Token, rest: []Token) {
+    if len(tokens) == 0 do parse_error()
+    return slice.split_first(tokens)
+}
+
+parse_error :: proc() {
+    fmt.println("Unsuccessful parse")
+    os.exit(3)
+}
+
 parse_expression_leaf :: proc(tokens: []Token) -> (Expr_Node, []Token) {
     tokens := tokens
     token: Token = ---
-    //fmt.println(tokens)
 
-    token, tokens = slice.split_first(tokens)
+    token, tokens = take_first_token(tokens)
     #partial switch token.type {
         case .IntConstant:
             expr := new(Int_Constant_Node)
@@ -290,12 +312,12 @@ parse_expression_leaf :: proc(tokens: []Token) -> (Expr_Node, []Token) {
         case .LParen:
             expr: Expr_Node = ---
             expr, tokens = parse_expression(tokens)
-            assert(tokens[0].type == .RParen)
+            if tokens[0].type != .RParen do parse_error()
             return expr, tokens[1:] // Remove the )
 
         case:
             fmt.println(token)
-            assert(false, "Invalid leaf token!")
+            parse_error()
     }
 
     // This is needed to keep Odin happy. Sadge
@@ -391,9 +413,8 @@ parse_statement :: proc(tokens: []Token) -> (Statement_Node, []Token) {
     tokens := tokens
     token: Token = ---
 
-
-    token, tokens = slice.split_first(tokens)
-    assert(token.type == .ReturnKeyword)
+    token, tokens = take_first_token(tokens)
+    if token.type != .ReturnKeyword do parse_error()
 
     statement := new(Return_Node) 
 
@@ -402,8 +423,8 @@ parse_statement :: proc(tokens: []Token) -> (Statement_Node, []Token) {
 
     statement.expr = expr
 
-    token, tokens = slice.split_first(tokens)
-    assert(token.type == .Semicolon)
+    token, tokens = take_first_token(tokens)
+    if token.type != .Semicolon do parse_error()
 
     return statement, tokens
 }
@@ -414,30 +435,33 @@ parse_function :: proc(tokens: []Token) -> (^Function_Node, []Token) {
 
     function := new(Function_Node)
 
-    token, tokens = slice.split_first(tokens)
-    assert(token.type == .IntKeyword)
+    token, tokens = take_first_token(tokens)
+    if token.type != .IntKeyword do parse_error()
 
-    token, tokens = slice.split_first(tokens)
-    assert(token.type == .Ident)
+    token, tokens = take_first_token(tokens)
+    if token.type != .Ident do parse_error()
     function.name = token.text
 
-    token, tokens = slice.split_first(tokens)
-    assert(token.type == .LParen)
-    token, tokens = slice.split_first(tokens)
-    assert(token.type == .Ident && token.text == "void")
-    token, tokens = slice.split_first(tokens)
-    assert(token.type == .RParen)
+    token, tokens = take_first_token(tokens)
+    if token.type != .LParen do parse_error()
+    token, tokens = take_first_token(tokens)
+    if token.type != .Ident || token.text != "void" do parse_error()
+    token, tokens = take_first_token(tokens)
+    if token.type != .RParen do parse_error()
 
-    token, tokens = slice.split_first(tokens)
-    assert(token.type == .LBrace)
+    token, tokens = take_first_token(tokens)
+    if token.type != .LBrace do parse_error()
 
     function.body = make([dynamic]Statement_Node)
     statement: Statement_Node = ---
     statement, tokens = parse_statement(tokens)
     append(&function.body, statement)
 
-    token, tokens = slice.split_first(tokens)
-    assert(token.type == .RBrace)
+    token, tokens = take_first_token(tokens)
+    if token.type != .RBrace do parse_error()
+
+    // @HACK: This will need to change when we parse multiple functions
+    if len(tokens) > 0 do parse_error()
 
     return function, tokens
 }
