@@ -4,13 +4,17 @@ import argparse
 
 import exp_files
 
+def is_case_of(dirpath: str, test_case: str) -> bool:
+    (head, current) = os.path.split(dirpath)
+    parent = os.path.basename(head)
+    return current == test_case or (parent == test_case and current == "extra_credit")
 
 def do_chapter_tests(dirname: str):
     global passed
     global failed
 
     for root, dirs, files in os.walk(dirname):
-        if os.path.basename(root) == "valid":
+        if is_case_of(root, "valid"):
             for file in filter(lambda f: f.endswith(".c"), files):
                 source_path = os.path.join(root, file)
                 print(f"Running test {os.path.join(root, file)}:  ", end = "")
@@ -21,6 +25,7 @@ def do_chapter_tests(dirname: str):
                     )
                 if compile_result.returncode != 0:
                     print("FAILED! Compilation failed")
+                    failed += 1
                     continue
                 exec_path = file[:-2] + ".exe"
                 exp_file_path = exp_files.exp_file_path_from_source_path(source_path)
@@ -38,7 +43,7 @@ def do_chapter_tests(dirname: str):
                     failed += 1
                 os.remove(exec_path)
 
-        elif os.path.basename(root) == "invalid_lex":
+        elif is_case_of(root, "invalid_lex"):
             for file in filter(lambda f: f.endswith(".c"), files):
                 source_path = os.path.join(root, file)
                 print(f"Running test {source_path}:  ", end = "")
@@ -54,7 +59,7 @@ def do_chapter_tests(dirname: str):
                     print("FAILED! Lex should not have succeeded")
                     failed += 1
 
-        elif os.path.basename(root) == "invalid_parse":
+        elif is_case_of(root, "invalid_parse"):
             for file in filter(lambda f: f.endswith(".c"), files):
                 source_path = os.path.join(root, file)
                 print(f"Running test {source_path}:  ", end = "")
