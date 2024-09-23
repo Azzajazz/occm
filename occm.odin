@@ -19,6 +19,7 @@ Token_Type :: enum {
     Tilde,
     Star,
     Percent,
+    Carat,
     ForwardSlash,
     Plus,
     And,
@@ -32,6 +33,8 @@ Token_Type :: enum {
     Equal,
     DoubleEqual,
     BangEqual, // !=
+    LessLess,  // <<
+    MoreMore,  // >>
 
     IntKeyword,
     ReturnKeyword,
@@ -185,6 +188,11 @@ lex :: proc(code: string) -> [dynamic]Token {
                 code = code[i + 1:]
                 continue
 
+            case '^':
+                append(&tokens, Token{.Carat, code[:1], {}})
+                code = code[1:]
+                continue
+
             case '+':
                 append(&tokens, Token{.Plus, code[:1], {}})
                 code = code[1:]
@@ -193,6 +201,11 @@ lex :: proc(code: string) -> [dynamic]Token {
             case '>':
                 if code[1] == '=' {
                     append(&tokens, Token{.MoreEqual, code[:2], {}})
+                    code = code[2:]
+                    continue
+                }
+                else if code[1] == '>' {
+                    append(&tokens, Token{.MoreMore, code[:2], {}})
                     code = code[2:]
                     continue
                 }
@@ -205,6 +218,11 @@ lex :: proc(code: string) -> [dynamic]Token {
             case '<':
                 if code[1] == '=' {
                     append(&tokens, Token{.LessEqual, code[:2], {}})
+                    code = code[2:]
+                    continue
+                }
+                else if code[1] == '<' {
+                    append(&tokens, Token{.LessLess, code[:2], {}})
                     code = code[2:]
                     continue
                 }
@@ -329,6 +347,8 @@ parse_expression_leaf :: proc(tokens: []Token) -> (Expr_Node, []Token) {
 op_precs := map[Token_Type]int {
     .DoubleAnd = 10,
     .DoublePipe = 10,
+    .Pipe = 13,
+    .Carat = 14,
     .And = 15,
     .DoubleEqual = 20,
     .BangEqual = 20,
@@ -336,6 +356,8 @@ op_precs := map[Token_Type]int {
     .LessEqual = 30,
     .More = 30,
     .MoreEqual = 30,
+    .LessLess = 35,
+    .MoreMore = 35,
     .Minus = 40,
     .Plus = 40,
     .ForwardSlash = 50,
@@ -344,7 +366,24 @@ op_precs := map[Token_Type]int {
 }
 
 bin_ops := bit_set[Token_Type] {
-    .DoubleAnd, .DoublePipe, .DoubleEqual, .BangEqual, .Less, .LessEqual, .More, .MoreEqual, .Minus, .Plus, .Star, .ForwardSlash, .Percent, .And
+    .DoubleAnd,
+    .DoublePipe,
+    .DoubleEqual,
+    .BangEqual,
+    .Less,
+    .LessEqual,
+    .More,
+    .MoreEqual,
+    .Minus,
+    .Plus,
+    .Star,
+    .ForwardSlash,
+    .Percent,
+    .And,
+    .Pipe,
+    .Carat,
+    .LessLess,
+    .MoreMore
 }
 
 make_binary_op_node :: proc(type: Token_Type) -> ^Binary_Op_Node {
@@ -391,6 +430,18 @@ make_binary_op_node :: proc(type: Token_Type) -> ^Binary_Op_Node {
 
         case .And:
             expr.type = .BitAnd
+
+        case .Pipe:
+            expr.type = .BitOr
+
+        case .Carat:
+            expr.type = .BitXor
+
+        case .LessLess:
+            expr.type = .ShiftLeft
+
+        case .MoreMore:
+            expr.type = .ShiftRight
 
         case:
             fmt.eprintln(type)
