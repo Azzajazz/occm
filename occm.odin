@@ -271,12 +271,14 @@ lex :: proc(code: string) -> [dynamic]Token {
 }
 
 take_first_token :: proc(tokens: []Token) -> (token: Token, rest: []Token) {
-    if len(tokens) == 0 do parse_error()
+    if len(tokens) == 0 do parse_error(token, tokens)
     return slice.split_first(tokens)
 }
 
-parse_error :: proc() {
-    fmt.println("Unsuccessful parse")
+parse_error :: proc(current: Token, rest: []Token, location := #caller_location) {
+    fmt.printfln("Unsuccessful parse in %v:%v", location.procedure, location.line)
+    fmt.printfln("Current token: %v", current)
+    fmt.printfln("The rest: %v", rest)
     os.exit(3)
 }
 
@@ -312,12 +314,12 @@ parse_expression_leaf :: proc(tokens: []Token) -> (Expr_Node, []Token) {
         case .LParen:
             expr: Expr_Node = ---
             expr, tokens = parse_expression(tokens)
-            if tokens[0].type != .RParen do parse_error()
+            if tokens[0].type != .RParen do parse_error(token, tokens)
             return expr, tokens[1:] // Remove the )
 
         case:
             fmt.println(token)
-            parse_error()
+            parse_error(token, tokens)
     }
 
     // This is needed to keep Odin happy. Sadge
@@ -327,6 +329,7 @@ parse_expression_leaf :: proc(tokens: []Token) -> (Expr_Node, []Token) {
 op_precs := map[Token_Type]int {
     .DoubleAnd = 10,
     .DoublePipe = 10,
+    .And = 15,
     .DoubleEqual = 20,
     .BangEqual = 20,
     .Less = 30,
@@ -341,7 +344,7 @@ op_precs := map[Token_Type]int {
 }
 
 bin_ops := bit_set[Token_Type] {
-    .DoubleAnd, .DoublePipe, .DoubleEqual, .BangEqual, .Less, .LessEqual, .More, .MoreEqual, .Minus, .Plus, .Star, .ForwardSlash, .Percent,
+    .DoubleAnd, .DoublePipe, .DoubleEqual, .BangEqual, .Less, .LessEqual, .More, .MoreEqual, .Minus, .Plus, .Star, .ForwardSlash, .Percent, .And
 }
 
 make_binary_op_node :: proc(type: Token_Type) -> ^Binary_Op_Node {
@@ -386,6 +389,9 @@ make_binary_op_node :: proc(type: Token_Type) -> ^Binary_Op_Node {
         case .More:
             expr.type = .BoolMore
 
+        case .And:
+            expr.type = .BitAnd
+
         case:
             fmt.eprintln(type)
             assert(false, "Not a valid binary operator!")
@@ -414,7 +420,7 @@ parse_statement :: proc(tokens: []Token) -> (Statement_Node, []Token) {
     token: Token = ---
 
     token, tokens = take_first_token(tokens)
-    if token.type != .ReturnKeyword do parse_error()
+    if token.type != .ReturnKeyword do parse_error(token, tokens)
 
     statement := new(Return_Node) 
 
@@ -424,7 +430,7 @@ parse_statement :: proc(tokens: []Token) -> (Statement_Node, []Token) {
     statement.expr = expr
 
     token, tokens = take_first_token(tokens)
-    if token.type != .Semicolon do parse_error()
+    if token.type != .Semicolon do parse_error(token, tokens)
 
     return statement, tokens
 }
@@ -436,21 +442,21 @@ parse_function :: proc(tokens: []Token) -> (^Function_Node, []Token) {
     function := new(Function_Node)
 
     token, tokens = take_first_token(tokens)
-    if token.type != .IntKeyword do parse_error()
+    if token.type != .IntKeyword do parse_error(token, tokens)
 
     token, tokens = take_first_token(tokens)
-    if token.type != .Ident do parse_error()
+    if token.type != .Ident do parse_error(token, tokens)
     function.name = token.text
 
     token, tokens = take_first_token(tokens)
-    if token.type != .LParen do parse_error()
+    if token.type != .LParen do parse_error(token, tokens)
     token, tokens = take_first_token(tokens)
-    if token.type != .Ident || token.text != "void" do parse_error()
+    if token.type != .Ident || token.text != "void" do parse_error(token, tokens)
     token, tokens = take_first_token(tokens)
-    if token.type != .RParen do parse_error()
+    if token.type != .RParen do parse_error(token, tokens)
 
     token, tokens = take_first_token(tokens)
-    if token.type != .LBrace do parse_error()
+    if token.type != .LBrace do parse_error(token, tokens)
 
     function.body = make([dynamic]Statement_Node)
     statement: Statement_Node = ---
@@ -458,10 +464,10 @@ parse_function :: proc(tokens: []Token) -> (^Function_Node, []Token) {
     append(&function.body, statement)
 
     token, tokens = take_first_token(tokens)
-    if token.type != .RBrace do parse_error()
+    if token.type != .RBrace do parse_error(token, tokens)
 
     // @HACK: This will need to change when we parse multiple functions
-    if len(tokens) > 0 do parse_error()
+    if len(tokens) > 0 do parse_error(token, tokens)
 
     return function, tokens
 }
@@ -646,6 +652,48 @@ emit_binary_op :: proc(builder: ^strings.Builder, op: Binary_Op_Node) {
             fmt.sbprintln(builder, "  cmp %rax, %rbx")
             fmt.sbprintln(builder, "  mov $0, %rax")
             fmt.sbprintln(builder, "  setge %al")
+
+        case .BitAnd:
+            emit_expr(builder, op.left)
+            fmt.sbprintln(builder, "  push %rax")
+            emit_expr(builder, op.right)
+            fmt.sbprintln(builder, "  pop %rbx")
+            fmt.sbprintln(builder, "  and %rbx, %rax")
+
+        case .BitOr:
+            emit_expr(builder, op.left)
+            fmt.sbprintln(builder, "  push %rax")
+            emit_expr(builder, op.right)
+            fmt.sbprintln(builder, "  pop %rbx")
+            fmt.sbprintln(builder, "  or %rbx, %rax")
+
+        case .BitXor:
+            emit_expr(builder, op.left)
+            fmt.sbprintln(builder, "  push %rax")
+            emit_expr(builder, op.right)
+            fmt.sbprintln(builder, "  pop %rbx")
+            fmt.sbprintln(builder, "  xor %rbx, %rax")
+
+        // @TODO: This will need some semantics passes, but we are skipping them for now until we have type checking since a lot of the semantics depends on this
+        case .ShiftLeft:
+            emit_expr(builder, op.left)
+            fmt.sbprintln(builder, "  push %rax")
+            emit_expr(builder, op.right)
+            fmt.sbprintln(builder, "  pop %rbx")
+            fmt.sbprintln(builder, "  mov %rax, %rcx")
+            fmt.sbprintln(builder, "  mov %rbx, %rax")
+            fmt.sbprintln(builder, "  shl %cl, %rax")
+
+        case .ShiftRight:
+            emit_expr(builder, op.left)
+            fmt.sbprintln(builder, "  push %rax")
+            emit_expr(builder, op.right)
+            fmt.sbprintln(builder, "  pop %rbx")
+            fmt.sbprintln(builder, "  mov %rax, %rcx")
+            fmt.sbprintln(builder, "  mov %rbx, %rax")
+            // @TODO: Whether this is a logical or arithmetic shift depends on the type of the left expression. Since we assume everything is a signed int for now,
+            // we do an arithmetic shift right.
+            fmt.sbprintln(builder, "  sar %cl, %rax")
     }
 }
 
