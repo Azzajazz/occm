@@ -15,6 +15,7 @@ Token_Type :: enum {
     LBrace,
     RBrace,
     Minus,
+    MinusMinus, // --
     Bang,
     Tilde,
     Star,
@@ -22,6 +23,7 @@ Token_Type :: enum {
     Carat,
     ForwardSlash,
     Plus,
+    PlusPlus, // ++
     And,
     DoubleAnd, // &&
     Pipe,
@@ -131,9 +133,16 @@ lex :: proc(code: string) -> [dynamic]Token {
                 continue
             
             case '-':
-                append(&tokens, Token{.Minus, code[:1], {}})
-                code = code[1:]
-                continue
+                if code[1] == '-' {
+                    append(&tokens, Token{.MinusMinus, code[:2], {}})
+                    code = code[2:]
+                    continue
+                }
+                else {
+                    append(&tokens, Token{.Minus, code[:1], {}})
+                    code = code[1:]
+                    continue
+                }
 
             case '!':
                 if code[1] == '=' {
@@ -194,9 +203,16 @@ lex :: proc(code: string) -> [dynamic]Token {
                 continue
 
             case '+':
-                append(&tokens, Token{.Plus, code[:1], {}})
-                code = code[1:]
-                continue
+                if code[1] == '+' {
+                    append(&tokens, Token{.PlusPlus, code[:2], {}})
+                    code = code[2:]
+                    continue
+                }
+                else {
+                    append(&tokens, Token{.Plus, code[:1], {}})
+                    code = code[1:]
+                    continue
+                }
 
             case '>':
                 if code[1] == '=' {
@@ -478,6 +494,7 @@ parse_statement :: proc(tokens: []Token) -> (Statement_Node, []Token) {
     token, tokens = take_first_token(tokens)
     #partial switch token.type {
         case .ReturnKeyword:
+            fmt.println(tokens)
             statement := new(Return_Node) 
             expr: Expr_Node = ---
             expr, tokens = parse_expression(tokens)
