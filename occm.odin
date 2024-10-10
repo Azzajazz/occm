@@ -92,7 +92,7 @@ is_ascii_alpha_byte :: proc(c: u8) -> bool {
 }
 
 is_ident_tail_byte :: proc(c: u8) -> bool {
-    return is_ascii_alpha_byte(c) || c == '_'
+    return is_ascii_alpha_byte(c) || is_ascii_digit_byte(c) || c == '_'
 }
 
 lex :: proc(code: string) -> [dynamic]Token {
