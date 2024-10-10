@@ -311,6 +311,11 @@ parse_expression_leaf :: proc(tokens: []Token) -> (Expr_Node, []Token) {
             expr.value = token.data.(int)
             return expr, tokens
 
+        case .Ident:
+            expr := new(Ident_Node)
+            expr.var_name = token.text
+            return expr, tokens
+
         case .Minus:
             expr := new(Unary_Op_Node)
             expr.type = .Negate
@@ -471,19 +476,43 @@ parse_statement :: proc(tokens: []Token) -> (Statement_Node, []Token) {
     token: Token = ---
 
     token, tokens = take_first_token(tokens)
-    if token.type != .ReturnKeyword do parse_error(token, tokens)
+    #partial switch token.type {
+        case .ReturnKeyword:
+            statement := new(Return_Node) 
+            expr: Expr_Node = ---
+            expr, tokens = parse_expression(tokens)
+            statement.expr = expr
+            token, tokens = take_first_token(tokens)
+            if token.type != .Semicolon do parse_error(token, tokens)
+            return statement, tokens
 
-    statement := new(Return_Node) 
+        case .IntKeyword:
+            token, tokens = take_first_token(tokens)
+            var_name := token.text
+            token, tokens = take_first_token(tokens)
 
-    expr: Expr_Node = ---
-    expr, tokens = parse_expression(tokens)
+            if token.type == .Semicolon {
+                statement := new(Decl_Node)
+                statement.var_name = var_name
+                return statement, tokens
+            }
+            else if token.type == .Equal {
+                statement := new(Decl_Assign_Node)
+                statement.var_name = var_name
+                statement.right, tokens = parse_expression(tokens)
+                token, tokens = take_first_token(tokens)
+                if token.type != .Semicolon do parse_error(token, tokens)
+                return statement, tokens
+            }
+            else {
+                parse_error(token, tokens)
+            }
 
-    statement.expr = expr
+        case:
+            parse_error(token, tokens)
+    }
 
-    token, tokens = take_first_token(tokens)
-    if token.type != .Semicolon do parse_error(token, tokens)
-
-    return statement, tokens
+    panic("Unreachable")
 }
 
 parse_function :: proc(tokens: []Token) -> (^Function_Node, []Token) {
@@ -510,9 +539,11 @@ parse_function :: proc(tokens: []Token) -> (^Function_Node, []Token) {
     if token.type != .LBrace do parse_error(token, tokens)
 
     function.body = make([dynamic]Statement_Node)
-    statement: Statement_Node = ---
-    statement, tokens = parse_statement(tokens)
-    append(&function.body, statement)
+    for tokens[0].type != .RBrace {
+        statement: Statement_Node = ---
+        statement, tokens = parse_statement(tokens)
+        append(&function.body, statement)
+    }
 
     token, tokens = take_first_token(tokens)
     if token.type != .RBrace do parse_error(token, tokens)
@@ -749,7 +780,7 @@ emit_binary_op :: proc(builder: ^strings.Builder, op: Binary_Op_Node) {
 }
 
 emit_expr :: proc(builder: ^strings.Builder, expr: Expr_Node) {
-    switch e in expr {
+    #partial switch e in expr {
         case ^Int_Constant_Node:
             fmt.sbprintfln(builder, "  mov $%v, %%rax", e.value)
 
@@ -762,7 +793,7 @@ emit_expr :: proc(builder: ^strings.Builder, expr: Expr_Node) {
 }
 
 emit_statement :: proc(builder: ^strings.Builder, statement: Statement_Node) {
-    switch stmt in statement {
+    #partial switch stmt in statement {
         case ^Return_Node:
             emit_expr(builder, stmt.expr)
             fmt.sbprintfln(builder, "ret")

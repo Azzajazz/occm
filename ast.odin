@@ -17,9 +17,20 @@ Function_Node :: struct {
 
 Expr_Node :: union {
     ^Int_Constant_Node,
+    ^Ident_Node,
     ^Unary_Op_Node,
     ^Binary_Op_Node,
     ^Assign_Node,
+}
+
+Int_Constant_Node :: struct {
+    using base: Node_Base,
+    value: int,
+}
+
+Ident_Node :: struct {
+    using base: Node_Base,
+    var_name: string,
 }
 
 Unary_Op_Type :: enum {
@@ -66,11 +77,6 @@ Assign_Node :: struct {
     using base: Node_Base,
     var_name: string,
     right: Expr_Node,
-}
-
-Int_Constant_Node :: struct {
-    using base: Node_Base,
-    value: int,
 }
 
 Statement_Node :: union {
@@ -143,7 +149,11 @@ pretty_print_expr_node :: proc(expr: Expr_Node, indent := 0) {
     switch e in expr {
         case ^Int_Constant_Node:
             print_indent(indent)
-            fmt.printfln("int_constant(value=%v)", e.value)
+            fmt.printfln("IntConstant(value=%v)", e.value)
+
+        case ^Ident_Node:
+            print_indent(indent)
+            fmt.printfln("Ident(var_name=%v)", e.var_name)
 
         case ^Unary_Op_Node:
             pretty_print_unary_op_node(e^, indent)
