@@ -19,6 +19,7 @@ Expr_Node :: union {
     ^Int_Constant_Node,
     ^Unary_Op_Node,
     ^Binary_Op_Node,
+    ^Assign_Node,
 }
 
 Unary_Op_Type :: enum {
@@ -47,6 +48,11 @@ Binary_Op_Type :: enum {
     BoolLessEqual,
     BoolMore,
     BoolMoreEqual,
+    BitAnd,
+    BitOr,
+    BitXor,
+    ShiftLeft,
+    ShiftRight,
 }
 
 Binary_Op_Node :: struct {
@@ -56,35 +62,37 @@ Binary_Op_Node :: struct {
     right: Expr_Node,
 }
 
+Assign_Node :: struct {
+    using base: Node_Base,
+    var_name: string,
+    right: Expr_Node,
+}
+
 Int_Constant_Node :: struct {
     using base: Node_Base,
     value: int,
 }
 
-/*
-Negate_Node :: struct {
-    using base: Node_Base,
-    expr: Expr_Node,
-}
-
-Bool_Negate_Node :: struct {
-    using base: Node_Base,
-    expr: Expr_Node,
-}
-
-Binary_Negate_Node :: struct {
-    using base: Node_Base,
-    expr: Expr_Node,
-}
-*/
-
 Statement_Node :: union {
     ^Return_Node,
+    ^Decl_Assign_Node,
+    ^Decl_Node,
 }
 
 Return_Node :: struct {
     using base: Node_Base,
     expr: Expr_Node,
+}
+
+Decl_Assign_Node :: struct {
+    using base: Node_Base,
+    var_name: string,
+    right: Expr_Node,
+}
+
+Decl_Node :: struct {
+    using base: Node_Base,
+    var_name: string,
 }
 
 // Printing functions for debugging
@@ -121,48 +129,7 @@ pretty_print_unary_op_node :: proc(op: Unary_Op_Node, indent := 0) {
 
 pretty_print_binary_op_node :: proc(op: Binary_Op_Node, indent := 0) {
     print_indent(indent)
-
-    switch op.type {
-        case .Add:
-            fmt.println("add(left=(")
-
-        case .Subtract:
-            fmt.println("subtract(")
-
-        case .Multiply:
-            fmt.println("multiply(")
-
-        case .Modulo:
-            fmt.println("modulo(")
-
-        case .Divide:
-            fmt.println("divide(")
-
-        case .BoolAnd:
-            fmt.println("bool_and(")
-
-        case .BoolOr:
-            fmt.println("bool_or(")
-
-        case .BoolEqual:
-            fmt.println("bool_equal(")
-
-        case .BoolNotEqual:
-            fmt.println("bool_not_equal(")
-
-        case .BoolLess:
-            fmt.println("bool_less(")
-
-        case .BoolLessEqual:
-            fmt.println("bool_less_equal(")
-
-        case .BoolMore:
-            fmt.println("bool_more(")
-
-        case .BoolMoreEqual:
-            fmt.println("bool_more_equal(")
-    }
-
+    fmt.printfln("%s(left=(", op.type)
     pretty_print_expr_node(op.left, indent + 1)
     print_indent(indent)
     fmt.println("), right=(")
@@ -183,6 +150,13 @@ pretty_print_expr_node :: proc(expr: Expr_Node, indent := 0) {
 
         case ^Binary_Op_Node:
             pretty_print_binary_op_node(e^, indent)
+
+        case ^Assign_Node:
+            print_indent(indent)
+            fmt.printfln("Assign(var_name=%v, value=(", e.var_name)
+            pretty_print_expr_node(e.right, indent + 1)
+            print_indent(indent)
+            fmt.println("))")
     }
 }
 
@@ -201,6 +175,15 @@ pretty_print_statement_node :: proc(statement: Statement_Node, indent := 0) {
                 print_indent(indent)
                 fmt.println(")")
             }
+
+        case ^Decl_Node:
+            fmt.printfln("Decl(var_name=%v)", stmt.var_name)
+
+        case ^Decl_Assign_Node:
+            fmt.printfln("DeclAssign(var_name=%v, right=(", stmt.var_name)
+            pretty_print_expr_node(stmt.right, indent + 1)
+            print_indent(indent)
+            fmt.println("))")
     }
 }
 
