@@ -488,6 +488,7 @@ parse_statement :: proc(tokens: []Token) -> (Statement_Node, []Token) {
 
         case .IntKeyword:
             token, tokens = take_first_token(tokens)
+            if token.type != .Ident do parse_error(token, tokens)
             var_name := token.text
             token, tokens = take_first_token(tokens)
 
