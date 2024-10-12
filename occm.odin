@@ -694,6 +694,7 @@ emit_binary_op :: proc(builder: ^strings.Builder, op: Binary_Op_Node, offsets: ^
             emit_expr(builder, op.right, offsets)
             fmt.sbprintln(builder, "  pop %rbx")
             fmt.sbprintln(builder, "  xor %edx, %edx")
+            fmt.sbprintln(builder, "  cmp $0, %ebx")
             fmt.sbprintfln(builder, "  jge L%v", current_label)
             fmt.sbprintln(builder, "  dec %edx")
             emit_label(builder)
