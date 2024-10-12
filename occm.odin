@@ -475,13 +475,22 @@ make_binary_op_node :: proc(type: Token_Type) -> ^Binary_Op_Node {
 parse_expression :: proc(tokens: []Token, min_prec := 0) -> (Expr_Node, []Token) {
     leaf, tokens := parse_expression_leaf(tokens)
 
-    for (tokens[0].type in bin_ops) && op_precs[tokens[0].type] >= min_prec {
-        prec := op_precs[tokens[0].type]
-        op := make_binary_op_node(tokens[0].type)
-        // @TODO: Handle associativity here (see https://eli.thegreenplace.net/2012/08/02/parsing-expressions-by-precedence-climbing)
-        op.right, tokens = parse_expression(tokens[1:], prec + 1)
-        op.left = leaf
-        leaf = op
+    for tokens[0].type == .Equal || ((tokens[0].type in bin_ops) && op_precs[tokens[0].type] >= min_prec) {
+        if tokens[0].type == .Equal {
+            ident, is_ident := leaf.(^Ident_Node)
+            if !is_ident do parse_error(tokens[0], tokens[1:])
+            op := new(Assign_Node)
+            op.var_name = ident.var_name 
+            op.right, tokens = parse_expression(tokens[1:], min_prec + 1)
+        }
+        else {
+            prec := op_precs[tokens[0].type]
+            op := make_binary_op_node(tokens[0].type)
+            // @TODO: Handle associativity here (see https://eli.thegreenplace.net/2012/08/02/parsing-expressions-by-precedence-climbing)
+            op.right, tokens = parse_expression(tokens[1:], prec + 1)
+            op.left = leaf
+            leaf = op
+        }
     }
 
     return leaf, tokens
