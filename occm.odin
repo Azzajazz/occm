@@ -394,13 +394,19 @@ parse_expression_leaf :: proc(tokens: []Token) -> (Expr_Node, []Token) {
             parse_error(token, tokens)
     }
 
-    // This is needed to keep Odin happy. Sadge
-    return Expr_Node{}, tokens
+    panic("Unreachable")
 }
 
 op_precs := map[Token_Type]int {
+    .Equal = 8,
+    .PlusEqual = 8,
+    .MinusEqual = 8,
+    .StarEqual = 8,
+    .SlashEqual = 8,
+    .PercentEqual = 8,
+    // @TODO: Add all other compound operators
+    .DoublePipe = 9,
     .DoubleAnd = 10,
-    .DoublePipe = 10,
     .Pipe = 13,
     .Carat = 14,
     .And = 15,
@@ -438,6 +444,15 @@ bin_ops := bit_set[Token_Type] {
     .Carat,
     .LessLess,
     .MoreMore
+}
+
+assign_ops := bit_set[Token_Type] {
+    .Equal,
+    .PlusEqual,
+    .MinusEqual,
+    .StarEqual,
+    .SlashEqual,
+    .PercentEqual,
 }
 
 make_binary_op_node :: proc(type: Token_Type) -> ^Binary_Op_Node {
@@ -508,13 +523,15 @@ make_binary_op_node :: proc(type: Token_Type) -> ^Binary_Op_Node {
 parse_expression :: proc(tokens: []Token, min_prec := 0) -> (Expr_Node, []Token) {
     leaf, tokens := parse_expression_leaf(tokens)
 
-    for tokens[0].type == .Equal || ((tokens[0].type in bin_ops) && op_precs[tokens[0].type] >= min_prec) {
-        if tokens[0].type == .Equal {
+    for ((tokens[0].type in assign_ops) || (tokens[0].type in bin_ops)) && op_precs[tokens[0].type] >= min_prec {
+        if (tokens[0].type in assign_ops) {
             ident, is_ident := leaf.(^Ident_Node)
             if !is_ident do parse_error(tokens[0], tokens[1:])
+
+            prec := op_precs[tokens[0].type]
             op := new(Assign_Node)
             op.var_name = ident.var_name 
-            op.right, tokens = parse_expression(tokens[1:], min_prec)
+            op.right, tokens = parse_expression(tokens[1:], prec)
             leaf = op
         }
         else {
