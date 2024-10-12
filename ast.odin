@@ -20,6 +20,7 @@ Expr_Node :: union {
     ^Ident_Node,
     ^Unary_Op_Node,
     ^Binary_Op_Node,
+    ^Compound_Op_Node,
     ^Assign_Node,
 }
 
@@ -70,6 +71,21 @@ Binary_Op_Node :: struct {
     using base: Node_Base,
     type: Binary_Op_Type,
     left: Expr_Node,
+    right: Expr_Node,
+}
+
+Compound_Op_Type :: enum {
+    PlusEqual,
+    MinusEqual,
+    TimesEqual,
+    DivideEqual,
+    ModEqual,
+}
+
+Compound_Op_Node :: enum {
+    using base: Node_Base,
+    type: Compound_Op_Type,
+    left: ^Ident_Node,
     right: Expr_Node,
 }
 
