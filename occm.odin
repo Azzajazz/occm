@@ -650,16 +650,16 @@ emit_unary_op :: proc(builder: ^strings.Builder, op: Unary_Op_Node, offsets: ^ma
     switch op.type {
         case .Negate:
             emit_expr(builder, op.expr, offsets)
-            fmt.sbprintln(builder, "  neg %rax")
+            fmt.sbprintln(builder, "  neg %eax")
 
         case .BinaryNegate:
             emit_expr(builder, op.expr, offsets)
-            fmt.sbprintln(builder, "  not %rax")
+            fmt.sbprintln(builder, "  not %eax")
 
         case .BoolNegate:
             emit_expr(builder, op.expr, offsets)
-            fmt.sbprintln(builder, "  cmp $0, %rax")
-            fmt.sbprintln(builder, "  mov $0, %rax")
+            fmt.sbprintln(builder, "  cmp $0, %eax")
+            fmt.sbprintln(builder, "  mov $0, %eax")
             fmt.sbprintln(builder, "  sete %al")
     }
 }
@@ -671,74 +671,74 @@ emit_binary_op :: proc(builder: ^strings.Builder, op: Binary_Op_Node, offsets: ^
             fmt.sbprintln(builder, "  push %rax")
             emit_expr(builder, op.right, offsets)
             fmt.sbprintln(builder, "  pop %rbx")
-            fmt.sbprintln(builder, "  add %rbx, %rax")
+            fmt.sbprintln(builder, "  add %ebx, %eax")
         
         case .Subtract:
             emit_expr(builder, op.left, offsets)
             fmt.sbprintln(builder, "  push %rax")
             emit_expr(builder, op.right, offsets)
             fmt.sbprintln(builder, "  pop %rbx")
-            fmt.sbprintln(builder, "  sub %rax, %rbx")
-            fmt.sbprintln(builder, "  mov %rbx, %rax")
+            fmt.sbprintln(builder, "  sub %eax, %ebx")
+            fmt.sbprintln(builder, "  mov %ebx, %eax")
 
         case .Multiply:
             emit_expr(builder, op.left, offsets)
             fmt.sbprintln(builder, "  push %rax")
             emit_expr(builder, op.right, offsets)
             fmt.sbprintln(builder, "  pop %rbx")
-            fmt.sbprintln(builder, "  imul %rbx")
+            fmt.sbprintln(builder, "  imul %ebx")
 
         case .Modulo:
             emit_expr(builder, op.left, offsets)
             fmt.sbprintln(builder, "  push %rax")
             emit_expr(builder, op.right, offsets)
             fmt.sbprintln(builder, "  pop %rbx")
-            fmt.sbprintln(builder, "  xor %rdx, %rdx")
+            fmt.sbprintln(builder, "  xor %edx, %edx")
             fmt.sbprintfln(builder, "  jge L%v", current_label)
-            fmt.sbprintln(builder, "  dec %rdx")
+            fmt.sbprintln(builder, "  dec %edx")
             emit_label(builder)
-            fmt.sbprintln(builder, "  mov %rax, %rcx")
-            fmt.sbprintln(builder, "  mov %rbx, %rax")
-            fmt.sbprintln(builder, "  idiv %rcx")
-            fmt.sbprintln(builder, "  mov %rdx, %rax")
+            fmt.sbprintln(builder, "  mov %eax, %ecx")
+            fmt.sbprintln(builder, "  mov %ebx, %eax")
+            fmt.sbprintln(builder, "  idiv %ecx")
+            fmt.sbprintln(builder, "  mov %edx, %eax")
 
         case .Divide:
             emit_expr(builder, op.left, offsets)
             fmt.sbprintln(builder, "  push %rax")
             emit_expr(builder, op.right, offsets)
             fmt.sbprintln(builder, "  pop %rbx")
-            fmt.sbprintln(builder, "  xor %rdx, %rdx")
-            fmt.sbprintln(builder, "  cmp $0, %rbx")
+            fmt.sbprintln(builder, "  xor %edx, %edx")
+            fmt.sbprintln(builder, "  cmp $0, %ebx")
             fmt.sbprintfln(builder, "  jge L%v", current_label)
-            fmt.sbprintln(builder, "  dec %rdx")
+            fmt.sbprintln(builder, "  dec %edx")
             emit_label(builder)
-            fmt.sbprintln(builder, "  mov %rax, %rcx")
-            fmt.sbprintln(builder, "  mov %rbx, %rax")
-            fmt.sbprintln(builder, "  idiv %rcx")
+            fmt.sbprintln(builder, "  mov %eax, %ecx")
+            fmt.sbprintln(builder, "  mov %ebx, %eax")
+            fmt.sbprintln(builder, "  idiv %ecx")
 
         case .BoolAnd:
             emit_expr(builder, op.left, offsets)
-            fmt.sbprintln(builder, "  cmp $0, %rax")
+            fmt.sbprintln(builder, "  cmp $0, %eax")
             label := current_label
             current_label += 1
             fmt.sbprintfln(builder, "  je L%v", label)
             emit_expr(builder, op.right, offsets)
-            fmt.sbprintln(builder, "  cmp $0, %rax")
+            fmt.sbprintln(builder, "  cmp $0, %eax")
             fmt.sbprintfln(builder, "  je L%v", label)
-            fmt.sbprintln(builder, "  mov $1, %rax")
+            fmt.sbprintln(builder, "  mov $1, %eax")
             emit_label(builder, label)
 
         case .BoolOr:
             emit_expr(builder, op.left, offsets)
-            fmt.sbprintln(builder, "  cmp $0, %rax")
+            fmt.sbprintln(builder, "  cmp $0, %eax")
             label := current_label
             current_label += 2 
             fmt.sbprintfln(builder, "  jne L%v", label)
             emit_expr(builder, op.right, offsets)
-            fmt.sbprintln(builder, "  cmp $0, %rax")
+            fmt.sbprintln(builder, "  cmp $0, %eax")
             fmt.sbprintfln(builder, "  je L%v", label + 1)
             emit_label(builder, label)
-            fmt.sbprintln(builder, "    mov $1, %rax")
+            fmt.sbprintln(builder, "    mov $1, %eax")
             emit_label(builder, label + 1)
 
         case .BoolEqual:
@@ -746,8 +746,8 @@ emit_binary_op :: proc(builder: ^strings.Builder, op: Binary_Op_Node, offsets: ^
             fmt.sbprintln(builder, "  push %rax")
             emit_expr(builder, op.right, offsets)
             fmt.sbprintln(builder, "  pop %rbx")
-            fmt.sbprintln(builder, "  cmp %rax, %rbx")
-            fmt.sbprintln(builder, "  mov $0, %rax")
+            fmt.sbprintln(builder, "  cmp %eax, %ebx")
+            fmt.sbprintln(builder, "  mov $0, %eax")
             fmt.sbprintln(builder, "  sete %al")
 
         case .BoolNotEqual:
@@ -755,8 +755,8 @@ emit_binary_op :: proc(builder: ^strings.Builder, op: Binary_Op_Node, offsets: ^
             fmt.sbprintln(builder, "  push %rax")
             emit_expr(builder, op.right, offsets)
             fmt.sbprintln(builder, "  pop %rbx")
-            fmt.sbprintln(builder, "  cmp %rax, %rbx")
-            fmt.sbprintln(builder, "  mov $0, %rax")
+            fmt.sbprintln(builder, "  cmp %eax, %ebx")
+            fmt.sbprintln(builder, "  mov $0, %eax")
             fmt.sbprintln(builder, "  setne %al")
 
         case .BoolLess:
@@ -764,8 +764,8 @@ emit_binary_op :: proc(builder: ^strings.Builder, op: Binary_Op_Node, offsets: ^
             fmt.sbprintln(builder, "  push %rax")
             emit_expr(builder, op.right, offsets)
             fmt.sbprintln(builder, "  pop %rbx")
-            fmt.sbprintln(builder, "  cmp %rax, %rbx")
-            fmt.sbprintln(builder, "  mov $0, %rax")
+            fmt.sbprintln(builder, "  cmp %eax, %ebx")
+            fmt.sbprintln(builder, "  mov $0, %eax")
             fmt.sbprintln(builder, "  setnge %al")
 
         case .BoolLessEqual:
@@ -773,8 +773,8 @@ emit_binary_op :: proc(builder: ^strings.Builder, op: Binary_Op_Node, offsets: ^
             fmt.sbprintln(builder, "  push %rax")
             emit_expr(builder, op.right, offsets)
             fmt.sbprintln(builder, "  pop %rbx")
-            fmt.sbprintln(builder, "  cmp %rax, %rbx")
-            fmt.sbprintln(builder, "  mov $0, %rax")
+            fmt.sbprintln(builder, "  cmp %eax, %ebx")
+            fmt.sbprintln(builder, "  mov $0, %eax")
             fmt.sbprintln(builder, "  setle %al")
 
         case .BoolMore:
@@ -782,8 +782,8 @@ emit_binary_op :: proc(builder: ^strings.Builder, op: Binary_Op_Node, offsets: ^
             fmt.sbprintln(builder, "  push %rax")
             emit_expr(builder, op.right, offsets)
             fmt.sbprintln(builder, "  pop %rbx")
-            fmt.sbprintln(builder, "  cmp %rax, %rbx")
-            fmt.sbprintln(builder, "  mov $0, %rax")
+            fmt.sbprintln(builder, "  cmp %eax, %ebx")
+            fmt.sbprintln(builder, "  mov $0, %eax")
             fmt.sbprintln(builder, "  setnle %al")
 
         case .BoolMoreEqual:
@@ -791,8 +791,8 @@ emit_binary_op :: proc(builder: ^strings.Builder, op: Binary_Op_Node, offsets: ^
             fmt.sbprintln(builder, "  push %rax")
             emit_expr(builder, op.right, offsets)
             fmt.sbprintln(builder, "  pop %rbx")
-            fmt.sbprintln(builder, "  cmp %rax, %rbx")
-            fmt.sbprintln(builder, "  mov $0, %rax")
+            fmt.sbprintln(builder, "  cmp %eax, %ebx")
+            fmt.sbprintln(builder, "  mov $0, %eax")
             fmt.sbprintln(builder, "  setge %al")
 
         case .BitAnd:
@@ -800,21 +800,21 @@ emit_binary_op :: proc(builder: ^strings.Builder, op: Binary_Op_Node, offsets: ^
             fmt.sbprintln(builder, "  push %rax")
             emit_expr(builder, op.right, offsets)
             fmt.sbprintln(builder, "  pop %rbx")
-            fmt.sbprintln(builder, "  and %rbx, %rax")
+            fmt.sbprintln(builder, "  and %ebx, %eax")
 
         case .BitOr:
             emit_expr(builder, op.left, offsets)
             fmt.sbprintln(builder, "  push %rax")
             emit_expr(builder, op.right, offsets)
             fmt.sbprintln(builder, "  pop %rbx")
-            fmt.sbprintln(builder, "  or %rbx, %rax")
+            fmt.sbprintln(builder, "  or %ebx, %eax")
 
         case .BitXor:
             emit_expr(builder, op.left, offsets)
             fmt.sbprintln(builder, "  push %rax")
             emit_expr(builder, op.right, offsets)
             fmt.sbprintln(builder, "  pop %rbx")
-            fmt.sbprintln(builder, "  xor %rbx, %rax")
+            fmt.sbprintln(builder, "  xor %ebx, %eax")
 
         // @TODO: This will need some semantics passes, but we are skipping them for now until we have type checking since a lot of the semantics depends on this
         case .ShiftLeft:
@@ -822,27 +822,27 @@ emit_binary_op :: proc(builder: ^strings.Builder, op: Binary_Op_Node, offsets: ^
             fmt.sbprintln(builder, "  push %rax")
             emit_expr(builder, op.right, offsets)
             fmt.sbprintln(builder, "  pop %rbx")
-            fmt.sbprintln(builder, "  mov %rax, %rcx")
-            fmt.sbprintln(builder, "  mov %rbx, %rax")
-            fmt.sbprintln(builder, "  shl %cl, %rax")
+            fmt.sbprintln(builder, "  mov %eax, %ecx")
+            fmt.sbprintln(builder, "  mov %ebx, %eax")
+            fmt.sbprintln(builder, "  shl %cl, %eax")
 
         case .ShiftRight:
             emit_expr(builder, op.left, offsets)
             fmt.sbprintln(builder, "  push %rax")
             emit_expr(builder, op.right, offsets)
             fmt.sbprintln(builder, "  pop %rbx")
-            fmt.sbprintln(builder, "  mov %rax, %rcx")
-            fmt.sbprintln(builder, "  mov %rbx, %rax")
+            fmt.sbprintln(builder, "  mov %eax, %ecx")
+            fmt.sbprintln(builder, "  mov %ebx, %eax")
             // @TODO: Whether this is a logical or arithmetic shift depends on the type of the left expression. Since we assume everything is a signed int for now,
             // we do an arithmetic shift right.
-            fmt.sbprintln(builder, "  sar %cl, %rax")
+            fmt.sbprintln(builder, "  sar %cl, %eax")
     }
 }
 
 emit_expr :: proc(builder: ^strings.Builder, expr: Expr_Node, offsets: ^map[string]int) {
     switch e in expr {
         case ^Int_Constant_Node:
-            fmt.sbprintfln(builder, "  mov $%v, %%rax", e.value)
+            fmt.sbprintfln(builder, "  mov $%v, %%eax", e.value)
 
         case ^Ident_Node:
             fmt.sbprintfln(builder, "  mov -%v(%%rbp), %%eax", offsets[e.var_name])
@@ -881,7 +881,7 @@ emit_function :: proc(builder: ^strings.Builder, function: ^Function_Node, vars:
     fmt.sbprintfln(builder, "%v:", function.name)
     fmt.sbprintln(builder, "  push %rbp")
     fmt.sbprintln(builder, "  mov %rsp, %rbp")
-    fmt.sbprintln(builder, "  xor %rax, %rax")
+    fmt.sbprintln(builder, "  xor %eax, %eax")
 
     // Calculate how much we need to decrement rsp by
     rsp_decrement := len(vars) * 4
