@@ -357,7 +357,6 @@ parse_expression_leaf :: proc(tokens: []Token) -> (Expr_Node, []Token) {
             return expr, tokens[1:] // Remove the )
 
         case:
-            fmt.println(token)
             parse_error(token, tokens)
     }
 
@@ -481,7 +480,8 @@ parse_expression :: proc(tokens: []Token, min_prec := 0) -> (Expr_Node, []Token)
             if !is_ident do parse_error(tokens[0], tokens[1:])
             op := new(Assign_Node)
             op.var_name = ident.var_name 
-            op.right, tokens = parse_expression(tokens[1:], min_prec + 1)
+            op.right, tokens = parse_expression(tokens[1:], min_prec)
+            leaf = op
         }
         else {
             prec := op_precs[tokens[0].type]
@@ -500,9 +500,9 @@ parse_statement :: proc(tokens: []Token) -> (Statement_Node, []Token) {
     tokens := tokens
     token: Token = ---
 
-    token, tokens = take_first_token(tokens)
-    #partial switch token.type {
+    #partial switch tokens[0].type {
         case .ReturnKeyword:
+            token, tokens = take_first_token(tokens)
             statement := new(Return_Node) 
             expr: Expr_Node = ---
             expr, tokens = parse_expression(tokens)
@@ -512,6 +512,7 @@ parse_statement :: proc(tokens: []Token) -> (Statement_Node, []Token) {
             return statement, tokens
 
         case .IntKeyword:
+            token, tokens = take_first_token(tokens)
             token, tokens = take_first_token(tokens)
             if token.type != .Ident do parse_error(token, tokens)
             var_name := token.text
@@ -535,7 +536,10 @@ parse_statement :: proc(tokens: []Token) -> (Statement_Node, []Token) {
             }
 
         case:
-            parse_error(token, tokens)
+            statement, tokens := parse_expression(tokens)
+            token, tokens = take_first_token(tokens)
+            if token.type != .Semicolon do parse_error(token, tokens)
+            return statement, tokens
     }
 
     panic("Unreachable")
@@ -850,7 +854,8 @@ emit_expr :: proc(builder: ^strings.Builder, expr: Expr_Node, offsets: ^map[stri
             emit_binary_op(builder, e^, offsets)
 
         case ^Assign_Node:
-            panic("Not implemented")
+            emit_expr(builder, e.right, offsets)
+            fmt.sbprintfln(builder, "  mov %%eax, -%v(%%rbp)", offsets[e.var_name])
     }
 }
 
@@ -865,6 +870,9 @@ emit_statement :: proc(builder: ^strings.Builder, statement: Statement_Node, off
             fmt.sbprintfln(builder, "  mov %%eax, -%v(%%rbp)", offsets[stmt.var_name])
 
         case ^Decl_Node: // Space on the stack is already allocated by emit_function
+
+        case Expr_Node:
+            emit_expr(builder, stmt, offsets)
     }
 }
 

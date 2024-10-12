@@ -83,6 +83,7 @@ Statement_Node :: union {
     ^Return_Node,
     ^Decl_Assign_Node,
     ^Decl_Node,
+    Expr_Node,
 }
 
 Return_Node :: struct {
@@ -171,10 +172,10 @@ pretty_print_expr_node :: proc(expr: Expr_Node, indent := 0) {
 }
 
 pretty_print_statement_node :: proc(statement: Statement_Node, indent := 0) {
-    print_indent(indent)
 
     switch stmt in statement {
         case ^Return_Node:
+            print_indent(indent)
             fmt.print("return(")
             if stmt.expr == nil {
                 fmt.println(")")
@@ -187,13 +188,18 @@ pretty_print_statement_node :: proc(statement: Statement_Node, indent := 0) {
             }
 
         case ^Decl_Node:
+            print_indent(indent)
             fmt.printfln("Decl(var_name=%v)", stmt.var_name)
 
         case ^Decl_Assign_Node:
+            print_indent(indent)
             fmt.printfln("DeclAssign(var_name=%v, right=(", stmt.var_name)
             pretty_print_expr_node(stmt.right, indent + 1)
             print_indent(indent)
             fmt.println("))")
+
+        case Expr_Node:
+            pretty_print_expr_node(stmt, indent)
     }
 }
 
