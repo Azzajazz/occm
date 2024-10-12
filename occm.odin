@@ -881,6 +881,7 @@ emit_function :: proc(builder: ^strings.Builder, function: ^Function_Node, vars:
     fmt.sbprintfln(builder, "%v:", function.name)
     fmt.sbprintln(builder, "  push %rbp")
     fmt.sbprintln(builder, "  mov %rsp, %rbp")
+    fmt.sbprintln(builder, "  xor %rax, %rax")
 
     // Calculate how much we need to decrement rsp by
     rsp_decrement := len(vars) * 4
