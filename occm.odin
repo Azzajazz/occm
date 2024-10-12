@@ -882,7 +882,6 @@ emit_function :: proc(builder: ^strings.Builder, function: ^Function_Node, vars:
     fmt.sbprintfln(builder, "%v:", function.name)
     fmt.sbprintln(builder, "  push %rbp")
     fmt.sbprintln(builder, "  mov %rsp, %rbp")
-    fmt.sbprintln(builder, "  xor %eax, %eax")
 
     // Calculate how much we need to decrement rsp by
     rsp_decrement := len(vars) * 4
@@ -899,6 +898,10 @@ emit_function :: proc(builder: ^strings.Builder, function: ^Function_Node, vars:
 
     for statement in function.body {
         emit_statement(builder, statement, &offsets, function.name)
+    }
+
+    if function.name == "main" {
+        fmt.sbprintln(builder, "  xor %eax, %eax")
     }
 
     fmt.sbprintfln(builder, "%v_done:", function.name)

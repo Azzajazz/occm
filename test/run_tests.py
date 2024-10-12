@@ -4,6 +4,11 @@ import argparse
 
 import exp_files
 
+def rebuild_compiler():
+    os.chdir("..")
+    subprocess.run(["odin", "build", "."])
+    os.chdir("test")
+
 def is_case_of(dirpath: str, test_case: str) -> bool:
     (head, current) = os.path.split(dirpath)
     parent = os.path.basename(head)
@@ -83,6 +88,8 @@ def main():
     parser.add_argument("-only")
     parser.add_argument("-norebuild")
     args = parser.parse_args()
+
+    rebuild_compiler()
 
     if not args.norebuild:
         os.chdir("..")
