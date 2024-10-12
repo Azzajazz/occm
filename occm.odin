@@ -832,7 +832,7 @@ emit_expr :: proc(builder: ^strings.Builder, expr: Expr_Node, offsets: ^map[stri
             fmt.sbprintfln(builder, "  mov $%v, %%rax", e.value)
 
         case ^Ident_Node:
-            fmt.sbprintfln(builder, "  movzx -%v(%%rbp), %%rax", offsets[e.var_name])
+            fmt.sbprintfln(builder, "  mov -%v(%%rbp), %%eax", offsets[e.var_name])
 
         case ^Unary_Op_Node:
             emit_unary_op(builder, e^, offsets)
