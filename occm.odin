@@ -37,6 +37,11 @@ Token_Type :: enum {
     BangEqual, // !=
     LessLess,  // <<
     MoreMore,  // >>
+    PlusEqual, // +=
+    MinusEqual, // -=
+    StarEqual, // *=
+    SlashEqual, // /=
+    PercentEqual, // %=
 
     IntKeyword,
     ReturnKeyword,
@@ -138,6 +143,11 @@ lex :: proc(code: string) -> [dynamic]Token {
                     code = code[2:]
                     continue
                 }
+                else if code[1] == '=' {
+                    append(&tokens, Token{.MinusEqual, code[:2], {}})
+                    code = code[2:]
+                    continue
+                }
                 else {
                     append(&tokens, Token{.Minus, code[:1], {}})
                     code = code[1:]
@@ -162,14 +172,28 @@ lex :: proc(code: string) -> [dynamic]Token {
                 continue
 
             case '*':
-                append(&tokens, Token{.Star, code[:1], {}})
-                code = code[1:]
-                continue
+                if code[1] == '=' {
+                    append(&tokens, Token{.StarEqual, code[:2], {}})
+                    code = code[2:]
+                    continue
+                }
+                else {
+                    append(&tokens, Token{.Star, code[:1], {}})
+                    code = code[1:]
+                    continue
+                }
 
             case '%':
-                append(&tokens, Token{.Percent, code[:1], {}})
-                code = code[1:]
-                continue
+                if code[1] == '=' {
+                    append(&tokens, Token{.PercentEqual, code[:2], {}})
+                    code = code[2:]
+                    continue
+                }
+                else {
+                    append(&tokens, Token{.Percent, code[:1], {}})
+                    code = code[1:]
+                    continue
+                }
 
             case '/':
                 if code[1] == '/' {
@@ -177,6 +201,11 @@ lex :: proc(code: string) -> [dynamic]Token {
                     i := 2
                     for code[i] != '\n' do i += 1
                     code = code[i + 1:]
+                }
+                else if code[1] == '=' {
+                    append(&tokens, Token{.SlashEqual, code[:2], {}})
+                    code = code[2:]
+                    continue
                 }
                 else if code[1] == '*' {
                     // Multi-line comments
@@ -205,6 +234,11 @@ lex :: proc(code: string) -> [dynamic]Token {
             case '+':
                 if code[1] == '+' {
                     append(&tokens, Token{.PlusPlus, code[:2], {}})
+                    code = code[2:]
+                    continue
+                }
+                else if code[1] == '=' {
+                    append(&tokens, Token{.PlusEqual, code[:2], {}})
                     code = code[2:]
                     continue
                 }
