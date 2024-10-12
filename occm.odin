@@ -570,6 +570,11 @@ parse_function :: proc(tokens: []Token) -> (^Function_Node, []Token) {
 
     function.body = make([dynamic]Statement_Node)
     for tokens[0].type != .RBrace {
+        // Skip null statements
+        if tokens[0].type == .Semicolon {
+            tokens = tokens[1:]
+            continue
+        }
         statement: Statement_Node = ---
         statement, tokens = parse_statement(tokens)
         append(&function.body, statement)
