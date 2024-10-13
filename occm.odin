@@ -1045,7 +1045,7 @@ emit_assign_op :: proc(builder: ^strings.Builder, op: Assign_Op_Node, offsets: ^
             fmt.sbprintln(builder, "  mov %eax, %ebx")
             fmt.sbprintfln(builder, "  mov -%v(%%rbp), %%eax", offsets[op.left.var_name])
             fmt.sbprintln(builder, "  xor %edx, %edx")
-            fmt.sbprintln(builder, "  cmp $0, %ebx")
+            fmt.sbprintln(builder, "  cmp $0, %eax")
             fmt.sbprintfln(builder, "  jge L%v", current_label)
             fmt.sbprintln(builder, "  dec %edx")
             emit_label(builder)
