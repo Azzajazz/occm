@@ -722,6 +722,8 @@ parse_function :: proc(tokens: []Token) -> (^Function_Node, []Token) {
         statement: Statement_Node = ---
         statement, tokens = parse_statement(tokens)
         append(&function.body, statement)
+
+        if len(tokens) == 0 do parse_error({}, {})
     }
 
     token, tokens = take_first_token(tokens)
