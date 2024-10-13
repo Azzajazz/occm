@@ -42,6 +42,11 @@ Token_Type :: enum {
     StarEqual, // *=
     SlashEqual, // /=
     PercentEqual, // %=
+    CaratEqual, // ^=
+    PipeEqual, // |=
+    AndEqual, // &=
+    LessLessEqual, // <<=
+    MoreMoreEqual, // >>=
 
     IntKeyword,
     ReturnKeyword,
@@ -227,9 +232,16 @@ lex :: proc(code: string) -> [dynamic]Token {
                 continue
 
             case '^':
-                append(&tokens, Token{.Carat, code[:1], {}})
-                code = code[1:]
-                continue
+                if code[1] == '=' {
+                    append(&tokens, Token{.CaratEqual, code[:2], {}})
+                    code = code[2:]
+                    continue
+                }
+                else {
+                    append(&tokens, Token{.Carat, code[:1], {}})
+                    code = code[1:]
+                    continue
+                }
 
             case '+':
                 if code[1] == '+' {
@@ -255,9 +267,16 @@ lex :: proc(code: string) -> [dynamic]Token {
                     continue
                 }
                 else if code[1] == '>' {
-                    append(&tokens, Token{.MoreMore, code[:2], {}})
-                    code = code[2:]
-                    continue
+                    if code[2] == '=' {
+                        append(&tokens, Token{.MoreMoreEqual, code[:3], {}})
+                        code = code[3:]
+                        continue
+                    }
+                    else {
+                        append(&tokens, Token{.MoreMore, code[:2], {}})
+                        code = code[2:]
+                        continue
+                    }
                 }
                 else {
                     append(&tokens, Token{.More, code[:1], {}})
@@ -272,9 +291,16 @@ lex :: proc(code: string) -> [dynamic]Token {
                     continue
                 }
                 else if code[1] == '<' {
-                    append(&tokens, Token{.LessLess, code[:2], {}})
-                    code = code[2:]
-                    continue
+                    if code[2] == '=' {
+                        append(&tokens, Token{.LessLessEqual, code[:3], {}})
+                        code = code[3:]
+                        continue
+                    }
+                    else {
+                        append(&tokens, Token{.LessLess, code[:2], {}})
+                        code = code[2:]
+                        continue
+                    }
                 }
                 else {
                     append(&tokens, Token{.Less, code[:1], {}})
@@ -288,6 +314,11 @@ lex :: proc(code: string) -> [dynamic]Token {
                     code = code[2:]
                     continue
                 }
+                else if code[1] == '=' {
+                    append(&tokens, Token{.AndEqual, code[:2], {}})
+                    code = code[2:]
+                    continue
+                }
                 else {
                     append(&tokens, Token{.And, code[:1], {}})
                     code = code[1:]
@@ -297,6 +328,11 @@ lex :: proc(code: string) -> [dynamic]Token {
             case '|':
                 if code[1] == '|' {
                     append(&tokens, Token{.DoublePipe, code[:2], {}})
+                    code = code[2:]
+                    continue
+                }
+                else if code[1] == '=' {
+                    append(&tokens, Token{.PipeEqual, code[:2], {}})
                     code = code[2:]
                     continue
                 }
@@ -404,6 +440,11 @@ op_precs := map[Token_Type]int {
     .StarEqual = 8,
     .SlashEqual = 8,
     .PercentEqual = 8,
+    .CaratEqual = 8,
+    .PipeEqual = 8,
+    .AndEqual = 8,
+    .LessLessEqual = 8,
+    .MoreMoreEqual = 8,
     // @TODO: Add all other compound operators
     .DoublePipe = 9,
     .DoubleAnd = 10,
@@ -453,6 +494,11 @@ assign_ops := bit_set[Token_Type] {
     .StarEqual,
     .SlashEqual,
     .PercentEqual,
+    .CaratEqual,
+    .PipeEqual,
+    .AndEqual,
+    .LessLessEqual,
+    .MoreMoreEqual,
 }
 
 make_binary_op_node :: proc(type: Token_Type) -> ^Binary_Op_Node {
@@ -541,6 +587,21 @@ make_assign_op_node :: proc(type: Token_Type) -> ^Assign_Op_Node {
 
         case .PercentEqual:
             node.type = .ModEqual
+
+        case .CaratEqual:
+            node.type = .XorEqual
+
+        case .PipeEqual:
+            node.type = .OrEqual
+
+        case .AndEqual:
+            node.type = .AndEqual
+
+        case .LessLessEqual:
+            node.type = .ShiftLeftEqual
+
+        case .MoreMoreEqual:
+            node.type = .ShiftRightEqual
 
         case:
             fmt.eprintln(type)
@@ -1001,6 +1062,38 @@ emit_assign_op :: proc(builder: ^strings.Builder, op: Assign_Op_Node, offsets: ^
             fmt.sbprintln(builder, "  idiv %ebx")
             fmt.sbprintfln(builder, "  mov %%edx, -%v(%%rbp)", offsets[op.left.var_name])
             fmt.sbprintln(builder, "  mov %edx, %eax")
+
+        case .XorEqual:
+            emit_expr(builder, op.right, offsets)
+            fmt.sbprintfln(builder, "  mov -%v(%%rbp), %%ebx", offsets[op.left.var_name])
+            fmt.sbprintln(builder, "  xor %ebx, %eax")
+            fmt.sbprintfln(builder, "  mov %%eax, -%v(%%rbp)", offsets[op.left.var_name])
+
+        case .OrEqual:
+            emit_expr(builder, op.right, offsets)
+            fmt.sbprintfln(builder, "  mov -%v(%%rbp), %%ebx", offsets[op.left.var_name])
+            fmt.sbprintln(builder, "  or %ebx, %eax")
+            fmt.sbprintfln(builder, "  mov %%eax, -%v(%%rbp)", offsets[op.left.var_name])
+
+        case .AndEqual:
+            emit_expr(builder, op.right, offsets)
+            fmt.sbprintfln(builder, "  mov -%v(%%rbp), %%ebx", offsets[op.left.var_name])
+            fmt.sbprintln(builder, "  and %ebx, %eax")
+            fmt.sbprintfln(builder, "  mov %%eax, -%v(%%rbp)", offsets[op.left.var_name])
+
+        case .ShiftLeftEqual:
+            emit_expr(builder, op.right, offsets)
+            fmt.sbprintln(builder, "  mov %eax, %ecx")
+            fmt.sbprintfln(builder, "  mov -%v(%%rbp), %%eax", offsets[op.left.var_name])
+            fmt.sbprintln(builder, "  shl %cl, %eax")
+            fmt.sbprintfln(builder, "  mov %%eax, -%v(%%rbp)", offsets[op.left.var_name])
+
+        case .ShiftRightEqual:
+            emit_expr(builder, op.right, offsets)
+            fmt.sbprintln(builder, "  mov %eax, %ecx")
+            fmt.sbprintfln(builder, "  mov -%v(%%rbp), %%eax", offsets[op.left.var_name])
+            fmt.sbprintln(builder, "  shr %cl, %eax")
+            fmt.sbprintfln(builder, "  mov %%eax, -%v(%%rbp)", offsets[op.left.var_name])
     }
 }
 

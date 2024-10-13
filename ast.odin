@@ -80,6 +80,11 @@ Assign_Op_Type :: enum {
     TimesEqual,
     DivideEqual,
     ModEqual,
+    XorEqual,
+    OrEqual,
+    AndEqual,
+    ShiftLeftEqual,
+    ShiftRightEqual,
 }
 
 Assign_Op_Node :: struct {
