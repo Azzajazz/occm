@@ -556,7 +556,9 @@ parse_expression :: proc(tokens: []Token, min_prec := 0) -> (Expr_Node, []Token)
     for ((tokens[0].type in assign_ops) || (tokens[0].type in bin_ops)) && op_precs[tokens[0].type] >= min_prec {
         if (tokens[0].type in assign_ops) {
             ident, is_ident := leaf.(^Ident_Node)
-            if !is_ident do parse_error(tokens[0], tokens[1:])
+            // @REVISIT: This would be better separated into the semantic pass, but this requires an Assign_Op_Node
+            // with a left that can be something other than an Ident_Node
+            if !is_ident do semantic_error()
 
             prec := op_precs[tokens[0].type]
             op := make_assign_op_node(tokens[0].type)
@@ -711,6 +713,9 @@ check_and_gather_function_variables :: proc(function: ^Function_Node, vars: ^[dy
         #partial switch stmt in statement {
             case Expr_Node:
                 validate_expr(stmt, vars)
+
+            case ^Return_Node:
+                validate_expr(stmt.expr, vars)
 
             case ^Decl_Node:
                 if contains_variable(stmt.var_name, vars) do semantic_error()
