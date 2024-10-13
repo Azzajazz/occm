@@ -20,8 +20,7 @@ Expr_Node :: union {
     ^Ident_Node,
     ^Unary_Op_Node,
     ^Binary_Op_Node,
-    ^Compound_Op_Node,
-    ^Assign_Node,
+    ^Assign_Op_Node,
 }
 
 Int_Constant_Node :: struct {
@@ -74,7 +73,8 @@ Binary_Op_Node :: struct {
     right: Expr_Node,
 }
 
-Compound_Op_Type :: enum {
+Assign_Op_Type :: enum {
+    Equal,
     PlusEqual,
     MinusEqual,
     TimesEqual,
@@ -82,16 +82,10 @@ Compound_Op_Type :: enum {
     ModEqual,
 }
 
-Compound_Op_Node :: enum {
+Assign_Op_Node :: struct {
     using base: Node_Base,
-    type: Compound_Op_Type,
+    type: Assign_Op_Type,
     left: ^Ident_Node,
-    right: Expr_Node,
-}
-
-Assign_Node :: struct {
-    using base: Node_Base,
-    var_name: string,
     right: Expr_Node,
 }
 
@@ -178,13 +172,20 @@ pretty_print_expr_node :: proc(expr: Expr_Node, indent := 0) {
         case ^Binary_Op_Node:
             pretty_print_binary_op_node(e^, indent)
 
-        case ^Assign_Node:
-            print_indent(indent)
-            fmt.printfln("Assign(var_name=%v, value=(", e.var_name)
-            pretty_print_expr_node(e.right, indent + 1)
-            print_indent(indent)
-            fmt.println("))")
+        case ^Assign_Op_Node:
+            pretty_print_assign_op_node(e^, indent)
     }
+}
+
+pretty_print_assign_op_node :: proc(assign_op: Assign_Op_Node, indent := 0) {
+    print_indent(indent)
+    fmt.printfln("%s(left=(", assign_op.type)
+    pretty_print_expr_node(assign_op.left, indent + 1)
+    print_indent(indent)
+    fmt.println("), right=(")
+    pretty_print_expr_node(assign_op.right, indent + 1)
+    print_indent(indent)
+    fmt.println("))")
 }
 
 pretty_print_statement_node :: proc(statement: Statement_Node, indent := 0) {

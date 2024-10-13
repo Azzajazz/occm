@@ -514,10 +514,40 @@ make_binary_op_node :: proc(type: Token_Type) -> ^Binary_Op_Node {
 
         case:
             fmt.eprintln(type)
-            assert(false, "Not a valid binary operator!")
+            panic("Not a valid binary operator")
     }
 
     return expr 
+}
+
+make_assign_op_node :: proc(type: Token_Type) -> ^Assign_Op_Node {
+    node := new(Assign_Op_Node)
+
+    #partial switch type {
+        case .Equal:
+            node.type = .Equal
+
+        case .PlusEqual:
+            node.type = .PlusEqual
+
+        case .MinusEqual:
+            node.type = .MinusEqual
+        
+        case .StarEqual:
+            node.type = .TimesEqual
+
+        case .SlashEqual:
+            node.type = .DivideEqual
+
+        case .PercentEqual:
+            node.type = .ModEqual
+
+        case:
+            fmt.eprintln(type)
+            panic("Not a valid compound operator!")
+    }
+
+    return node
 }
 
 parse_expression :: proc(tokens: []Token, min_prec := 0) -> (Expr_Node, []Token) {
@@ -529,8 +559,8 @@ parse_expression :: proc(tokens: []Token, min_prec := 0) -> (Expr_Node, []Token)
             if !is_ident do parse_error(tokens[0], tokens[1:])
 
             prec := op_precs[tokens[0].type]
-            op := new(Assign_Node)
-            op.var_name = ident.var_name 
+            op := make_assign_op_node(tokens[0].type)
+            op.left = ident 
             op.right, tokens = parse_expression(tokens[1:], prec)
             leaf = op
         }
@@ -896,6 +926,58 @@ emit_binary_op :: proc(builder: ^strings.Builder, op: Binary_Op_Node, offsets: ^
     }
 }
 
+emit_assign_op :: proc(builder: ^strings.Builder, op: Assign_Op_Node, offsets: ^map[string]int) {
+    switch op.type {
+        case .Equal:
+            emit_expr(builder, op.right, offsets)
+            fmt.sbprintfln(builder, "  mov %%eax, -%v(%%rbp)", offsets[op.left.var_name])
+
+        case .PlusEqual:
+            emit_expr(builder, op.right, offsets)
+            fmt.sbprintfln(builder, "  mov -%v(%%rbp), %%ebx", offsets[op.left.var_name])
+            fmt.sbprintln(builder, "  add %ebx, %eax")
+            fmt.sbprintfln(builder, "  mov %%eax, -%v(%%rbp)", offsets[op.left.var_name])
+            
+        case .MinusEqual:
+            emit_expr(builder, op.right, offsets)
+            fmt.sbprintln(builder, "  mov %eax, %ebx")
+            fmt.sbprintfln(builder, "  mov -%v(%%rbp), %%eax", offsets[op.left.var_name])
+            fmt.sbprintln(builder, "  sub %ebx, %eax")
+            fmt.sbprintfln(builder, "  mov %%eax, -%v(%%rbp)", offsets[op.left.var_name])
+
+        case .TimesEqual:
+            emit_expr(builder, op.right, offsets)
+            fmt.sbprintfln(builder, "  mov -%v(%%rbp), %%ebx", offsets[op.left.var_name])
+            fmt.sbprintln(builder, "  imul %ebx, %eax")
+            fmt.sbprintfln(builder, "  mov %%eax, -%v(%%rbp)", offsets[op.left.var_name])
+
+        case .DivideEqual:
+            emit_expr(builder, op.right, offsets)
+            fmt.sbprintln(builder, "  mov %eax, %ebx")
+            fmt.sbprintfln(builder, "  mov -%v(%%rbp), %%eax", offsets[op.left.var_name])
+            fmt.sbprintln(builder, "  xor %edx, %edx")
+            fmt.sbprintln(builder, "  cmp $0, %ebx")
+            fmt.sbprintfln(builder, "  jge L%v", current_label)
+            fmt.sbprintln(builder, "  dec %edx")
+            emit_label(builder)
+            fmt.sbprintln(builder, "  idiv %ebx")
+            fmt.sbprintfln(builder, "  mov %%eax, -%v(%%rbp)", offsets[op.left.var_name])
+
+        case .ModEqual:
+            emit_expr(builder, op.right, offsets)
+            fmt.sbprintln(builder, "  mov %eax, %ebx")
+            fmt.sbprintfln(builder, "  mov -%v(%%rbp), %%eax", offsets[op.left.var_name])
+            fmt.sbprintln(builder, "  xor %edx, %edx")
+            fmt.sbprintln(builder, "  cmp $0, %ebx")
+            fmt.sbprintfln(builder, "  jge L%v", current_label)
+            fmt.sbprintln(builder, "  dec %edx")
+            emit_label(builder)
+            fmt.sbprintln(builder, "  idiv %ebx")
+            fmt.sbprintfln(builder, "  mov %%edx, -%v(%%rbp)", offsets[op.left.var_name])
+            fmt.sbprintln(builder, "  mov %edx, %eax")
+    }
+}
+
 emit_expr :: proc(builder: ^strings.Builder, expr: Expr_Node, offsets: ^map[string]int) {
     switch e in expr {
         case ^Int_Constant_Node:
@@ -910,9 +992,8 @@ emit_expr :: proc(builder: ^strings.Builder, expr: Expr_Node, offsets: ^map[stri
         case ^Binary_Op_Node:
             emit_binary_op(builder, e^, offsets)
 
-        case ^Assign_Node:
-            emit_expr(builder, e.right, offsets)
-            fmt.sbprintfln(builder, "  mov %%eax, -%v(%%rbp)", offsets[e.var_name])
+        case ^Assign_Op_Node:
+            emit_assign_op(builder, e^, offsets)
     }
 }
 
