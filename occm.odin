@@ -692,7 +692,7 @@ contains_variable :: proc(var: string, vars: ^[dynamic]string) -> bool {
 }
 
 semantic_error :: proc() {
-    os.exit(3)
+    os.exit(4)
 }
 
 check_and_gather_variables :: proc(program: Program) -> map[string][dynamic]string {
@@ -709,6 +709,9 @@ check_and_gather_variables :: proc(program: Program) -> map[string][dynamic]stri
 check_and_gather_function_variables :: proc(function: ^Function_Node, vars: ^[dynamic]string) {
     for statement in function.body {
         #partial switch stmt in statement {
+            case Expr_Node:
+                validate_expr(stmt, vars)
+
             case ^Decl_Node:
                 if contains_variable(stmt.var_name, vars) do semantic_error()
                 append(vars, stmt.var_name)
@@ -717,6 +720,24 @@ check_and_gather_function_variables :: proc(function: ^Function_Node, vars: ^[dy
                 if contains_variable(stmt.var_name, vars) do semantic_error()
                 append(vars, stmt.var_name)
         }
+    }
+}
+
+validate_expr :: proc(expr: Expr_Node, vars: ^[dynamic]string) {
+    #partial switch e in expr {
+        case ^Ident_Node:
+            if !contains_variable(e.var_name, vars) do semantic_error()
+
+        case ^Unary_Op_Node:
+            validate_expr(e.expr, vars)
+
+        case ^Binary_Op_Node:
+            validate_expr(e.left, vars)
+            validate_expr(e.right, vars)
+
+        case ^Assign_Op_Node:
+            validate_expr(e.left, vars)
+            validate_expr(e.right, vars)
     }
 }
 

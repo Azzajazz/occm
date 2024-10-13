@@ -80,6 +80,23 @@ def do_chapter_tests(dirname: str):
                     print("FAILED! Parse should not have succeeded")
                     failed += 1
 
+        elif is_case_of(root, "invalid_semantics"):
+            for file in filter(lambda f: f.endswith(".c"), files):
+                source_path = os.path.join(root, file)
+                print(f"Running test {source_path}:  ", end = "")
+                compile_result = subprocess.run(
+                        ["../occm.exe", source_path],
+                        stdout=subprocess.DEVNULL,
+                        stderr=subprocess.DEVNULL
+                    )               
+                if compile_result.returncode == 4:
+                    print("PASSED!")
+                    passed += 1
+                else:
+                    print("FAILED! Semantics are incorrect")
+                    failed += 1
+
+
 
 def main():
     parser = argparse.ArgumentParser()
