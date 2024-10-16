@@ -17,6 +17,8 @@ Token_Type :: enum {
     Minus,
     MinusMinus, // --
     Bang,
+    QuestionMark,
+    Colon,
     Tilde,
     Star,
     Percent,
@@ -50,6 +52,8 @@ Token_Type :: enum {
 
     IntKeyword,
     ReturnKeyword,
+    IfKeyword,
+    ElseKeyword,
     Ident,
     IntConstant,
     Semicolon,
@@ -170,6 +174,16 @@ lex :: proc(code: string) -> [dynamic]Token {
                     code = code[1:]
                     continue
                 }
+
+            case '?':
+                append(&tokens, Token{.QuestionMark, code[:1], {}})
+                code = code[1:]
+                continue
+
+            case ':':
+                append(&tokens, Token{.Colon, code[:1], {}})
+                code = code[1:]
+                continue
 
             case '~':
                 append(&tokens, Token{.Tilde, code[:1], {}})
@@ -661,20 +675,11 @@ parse_expression :: proc(tokens: []Token, min_prec := 0) -> (^Ast_Node, []Token)
     return leaf, tokens
 }
 
-parse_statement :: proc(tokens: []Token) -> (^Ast_Node, []Token) {
+parse_block_statement :: proc(tokens: []Token) -> (^Ast_Node, []Token) {
     tokens := tokens
     token := peek_first_token(tokens)
 
     #partial switch token.type {
-        case .ReturnKeyword:
-            tokens = tokens[1:]
-            expr: ^Ast_Node = ---
-            expr, tokens = parse_expression(tokens)
-            statement := make_node_1(Return_Node, expr)
-            token, tokens = take_first_token(tokens)
-            if token.type != .Semicolon do parse_error(token, tokens)
-            return statement, tokens
-
         case .IntKeyword:
             token, tokens = take_first_token(tokens)
             token, tokens = take_first_token(tokens)
@@ -697,6 +702,27 @@ parse_statement :: proc(tokens: []Token) -> (^Ast_Node, []Token) {
             else {
                 parse_error(token, tokens)
             }
+
+        case:
+            return parse_statement(tokens)
+    }
+    
+    panic("Unreachable")
+}
+
+parse_statement :: proc(tokens: []Token) -> (^Ast_Node, []Token) {
+    tokens := tokens
+    token := peek_first_token(tokens)
+
+    #partial switch token.type {
+        case .ReturnKeyword:
+            tokens = tokens[1:]
+            expr: ^Ast_Node = ---
+            expr, tokens = parse_expression(tokens)
+            statement := make_node_1(Return_Node, expr)
+            token, tokens = take_first_token(tokens)
+            if token.type != .Semicolon do parse_error(token, tokens)
+            return statement, tokens
 
         case:
             statement, tokens := parse_expression(tokens)
@@ -736,9 +762,9 @@ parse_function :: proc(tokens: []Token) -> (^Ast_Node, []Token) {
             tokens = tokens[1:]
             continue
         }
-        statement: ^Ast_Node = ---
-        statement, tokens = parse_statement(tokens)
-        append(&body, statement)
+        block_statement: ^Ast_Node = ---
+        block_statement, tokens = parse_block_statement(tokens)
+        append(&body, block_statement)
 
         if len(tokens) == 0 do parse_error({}, {})
     }
