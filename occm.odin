@@ -675,7 +675,8 @@ parse_expression :: proc(tokens: []Token, min_prec := 0) -> (^Ast_Node, []Token)
             token, tokens = take_first_token(tokens)
             if token.type != .Colon do parse_error(token, tokens)
             if_false, tokens = parse_expression(tokens, prec)
-            return make_node_3(Ternary_Node, leaf, if_true, if_false), tokens
+            op := make_node_3(Ternary_Node, leaf, if_true, if_false)
+            leaf = op
         }
 
         token = peek_first_token(tokens)
@@ -850,22 +851,42 @@ check_and_gather_variables :: proc(program: Program) -> map[string][dynamic]stri
 }
 
 check_and_gather_function_variables :: proc(function: Function_Node, vars: ^[dynamic]string) {
-    for statement in function.body {
-        #partial switch stmt in statement.variant {
-            case Return_Node:
-                validate_expr(stmt.expr, vars)
+    for block_statement in function.body {
+        validate_block_statement(block_statement, vars)
+    }
+}
 
-            case Decl_Node:
-                if contains_variable(stmt.var_name, vars) do semantic_error()
-                append(vars, stmt.var_name)
+validate_block_statement :: proc(block_statement: ^Ast_Node, vars: ^[dynamic]string) {
+    #partial switch stmt in block_statement.variant {
+        case Decl_Node:
+            if contains_variable(stmt.var_name, vars) do semantic_error()
+            append(vars, stmt.var_name)
 
-            case Decl_Assign_Node:
-                if contains_variable(stmt.var_name, vars) do semantic_error()
-                append(vars, stmt.var_name)
+        case Decl_Assign_Node:
+            if contains_variable(stmt.var_name, vars) do semantic_error()
+            append(vars, stmt.var_name)
 
-            case:
-                validate_expr(statement, vars)
-        }
+        case:
+            validate_statement(block_statement, vars)
+    }
+}
+
+validate_statement :: proc(statement: ^Ast_Node, vars: ^[dynamic]string) {
+    #partial switch stmt in statement.variant {
+        case Return_Node:
+            validate_expr(stmt.expr, vars)
+
+        case If_Node:
+            validate_expr(stmt.condition, vars)
+            validate_statement(stmt.if_true, vars)
+
+        case If_Else_Node:
+            validate_expr(stmt.condition, vars)
+            validate_statement(stmt.if_true, vars)
+            validate_statement(stmt.if_false, vars)
+
+        case:
+            validate_expr(statement, vars)
     }
 }
 
@@ -978,6 +999,11 @@ validate_expr :: proc(expr: ^Ast_Node, vars: ^[dynamic]string) {
         case Shift_Right_Equal_Node:
             _, is_ident := e.left.variant.(Ident_Node)
             if !is_ident do semantic_error()
+
+        case Ternary_Node:
+            validate_expr(e.condition, vars)
+            validate_expr(e.if_true, vars)
+            validate_expr(e.if_false, vars)
     }
 }
 
