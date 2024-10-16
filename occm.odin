@@ -734,7 +734,7 @@ parse_statement :: proc(tokens: []Token) -> (^Ast_Node, []Token) {
             return statement, tokens
 
         case .IfKeyword:
-            tokens := tokens[1:]
+            tokens = tokens[1:]
             token, tokens = take_first_token(tokens)
             if token.type != .LParen do parse_error(token, tokens)
             condition: ^Ast_Node = ---
@@ -744,6 +744,9 @@ parse_statement :: proc(tokens: []Token) -> (^Ast_Node, []Token) {
             if_true: ^Ast_Node = ---
             if_true, tokens = parse_statement(tokens)
             return make_node_2(If_Node, condition, if_true), tokens
+
+        case .Semicolon:
+            return make_node_0(Null_Statement_Node), tokens[1:]
 
         case:
             statement, tokens := parse_expression(tokens)

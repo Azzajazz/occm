@@ -50,6 +50,7 @@ Ast_Node :: struct {
         And_Equal_Node,
         Shift_Left_Equal_Node,
         Shift_Right_Equal_Node,
+        Null_Statement_Node,
         Return_Node,
         Decl_Assign_Node,
         Decl_Node,
@@ -121,6 +122,8 @@ And_Equal_Node :: distinct Equal_Node
 Shift_Left_Equal_Node :: distinct Equal_Node
 Shift_Right_Equal_Node :: distinct Equal_Node
 
+Null_Statement_Node :: struct {}
+
 Return_Node :: struct {
     expr: ^Ast_Node,
 }
@@ -143,6 +146,12 @@ Ternary_Node :: struct {
 If_Node :: struct {
     condition: ^Ast_Node,
     if_true: ^Ast_Node,
+}
+
+make_node_0 :: proc($T: typeid) -> ^Ast_Node {
+    node := new(Ast_Node)
+    node.variant = T{}
+    return node
 }
 
 make_node_1 :: proc($T: typeid, inner: $I) -> ^Ast_Node {
