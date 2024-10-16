@@ -477,18 +477,18 @@ parse_postfix_operators :: proc(inner: ^Ast_Node, tokens: []Token) -> (^Ast_Node
 }
 
 op_precs := map[Token_Type]int {
-    .Equal = 8,
-    .PlusEqual = 8,
-    .MinusEqual = 8,
-    .StarEqual = 8,
-    .SlashEqual = 8,
-    .PercentEqual = 8,
-    .CaratEqual = 8,
-    .PipeEqual = 8,
-    .AndEqual = 8,
-    .LessLessEqual = 8,
-    .MoreMoreEqual = 8,
-    // @TODO: Add all other compound operators
+    .Equal = 7,
+    .PlusEqual = 7,
+    .MinusEqual = 7,
+    .StarEqual = 7,
+    .SlashEqual = 7,
+    .PercentEqual = 7,
+    .CaratEqual = 7,
+    .PipeEqual = 7,
+    .AndEqual = 7,
+    .LessLessEqual = 7,
+    .MoreMoreEqual = 7,
+    .QuestionMark = 8,
     .DoublePipe = 9,
     .DoubleAnd = 10,
     .Pipe = 13,
@@ -647,7 +647,8 @@ parse_expression :: proc(tokens: []Token, min_prec := 0) -> (^Ast_Node, []Token)
     leaf, tokens := parse_expression_leaf(tokens)
     token := peek_first_token(tokens)
 
-    for (token.type in assign_ops || token.type in bin_ops) && op_precs[token.type] >= min_prec {
+    for (token.type in assign_ops || token.type in bin_ops || token.type == .QuestionMark) \
+        && op_precs[token.type] >= min_prec {
         if (token.type in assign_ops) {
             _, is_ident := leaf.variant.(Ident_Node)
             // @REVISIT: This would be better separated into the semantic pass, but this requires an Assign_Op_Node
@@ -660,13 +661,23 @@ parse_expression :: proc(tokens: []Token, min_prec := 0) -> (^Ast_Node, []Token)
             op := make_binary_op_node(token.type, leaf, right)
             leaf = op
         }
-        else {
+        else if token.type in bin_ops {
             prec := op_precs[token.type]
             right: ^Ast_Node = ---
             // @TODO: Handle associativity here (see https://eli.thegreenplace.net/2012/08/02/parsing-expressions-by-precedence-climbing)
             right, tokens = parse_expression(tokens[1:], prec + 1)
             op := make_binary_op_node(token.type, leaf, right)
             leaf = op
+        }
+        else {
+            prec := op_precs[token.type]
+            if_true: ^Ast_Node = ---
+            if_false: ^Ast_Node = ---
+            if_true, tokens = parse_expression(tokens[1:], prec)
+            token, tokens = take_first_token(tokens)
+            if token.type != .Colon do parse_error(token, tokens)
+            if_false, tokens = parse_expression(tokens, prec)
+            return make_node_3(Ternary_Node, leaf, if_true, if_false), tokens
         }
 
         token = peek_first_token(tokens)
@@ -1311,6 +1322,18 @@ emit_expr :: proc(builder: ^strings.Builder, expr: ^Ast_Node, offsets: ^map[stri
         case And_Equal_Node: emit_assign_op(builder, expr, offsets)
         case Shift_Left_Equal_Node: emit_assign_op(builder, expr, offsets)
         case Shift_Right_Equal_Node: emit_assign_op(builder, expr, offsets)
+
+        case Ternary_Node:
+            label := current_label
+            current_label += 1
+            emit_expr(builder, e.condition, offsets)
+            fmt.sbprintln(builder, "  cmp $0, %eax")
+            fmt.sbprintfln(builder, "  je L%v", label)
+            emit_expr(builder, e.if_true, offsets)
+            fmt.sbprintfln(builder, "  jmp L%v", label + 1)
+            emit_label(builder, label)
+            emit_expr(builder, e.if_false, offsets)
+            emit_label(builder, label + 1)
 
         case:
             fmt.println(expr)

@@ -53,6 +53,7 @@ Ast_Node :: struct {
         Return_Node,
         Decl_Assign_Node,
         Decl_Node,
+        Ternary_Node,
     },
 }
 
@@ -132,6 +133,12 @@ Decl_Node :: struct {
     var_name: string 
 }
 
+Ternary_Node :: struct {
+    condition: ^Ast_Node,
+    if_true: ^Ast_Node,
+    if_false: ^Ast_Node,
+}
+
 make_node_1 :: proc($T: typeid, inner: $I) -> ^Ast_Node {
     node := new(Ast_Node)
     node.variant = T{inner}
@@ -141,6 +148,12 @@ make_node_1 :: proc($T: typeid, inner: $I) -> ^Ast_Node {
 make_node_2 :: proc($T: typeid, first: $F, second: $S) -> ^Ast_Node {
     node := new(Ast_Node)
     node.variant = T{first, second}
+    return node
+}
+
+make_node_3 :: proc($T: typeid, first: $F, second: $S, third: $H) -> ^Ast_Node {
+    node := new(Ast_Node)
+    node.variant = T{first, second, third}
     return node
 }
 
