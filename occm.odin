@@ -1325,7 +1325,7 @@ emit_expr :: proc(builder: ^strings.Builder, expr: ^Ast_Node, offsets: ^map[stri
 
         case Ternary_Node:
             label := current_label
-            current_label += 1
+            current_label += 2
             emit_expr(builder, e.condition, offsets)
             fmt.sbprintln(builder, "  cmp $0, %eax")
             fmt.sbprintfln(builder, "  je L%v", label)
