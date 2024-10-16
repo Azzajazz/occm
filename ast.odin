@@ -1,120 +1,147 @@
 package occm
 
 import "core:fmt"
+import "core:reflect"
+import "base:runtime"
 
 Program :: struct {
-    children: [dynamic]^Function_Node,
+    children: [dynamic]^Ast_Node,
 }
 
-Node_Base :: struct {
+Ast_Node :: struct {
+    // Common stuff would go here
+    variant: union {
+        Function_Node,
+        Int_Constant_Node,
+        Ident_Node,
+        Negate_Node,
+        Bit_Negate_Node,
+        Boolean_Negate_Node,
+        Pre_Decrement_Node,
+        Pre_Increment_Node,
+        Post_Decrement_Node,
+        Post_Increment_Node,
+        Add_Node,
+        Subtract_Node,
+        Multiply_Node,
+        Modulo_Node,
+        Divide_Node,
+        Boolean_And_Node,
+        Boolean_Or_Node,
+        Boolean_Equal_Node,
+        Boolean_Not_Equal_Node,
+        Less_Node,
+        Less_Equal_Node,
+        More_Node,
+        More_Equal_Node,
+        Bit_And_Node,
+        Bit_Or_Node,
+        Bit_Xor_Node,
+        Shift_Left_Node,
+        Shift_Right_Node,
+        Equal_Node,
+        Plus_Equal_Node,
+        Minus_Equal_Node,
+        Times_Equal_Node,
+        Divide_Equal_Node,
+        Modulo_Equal_Node,
+        Xor_Equal_Node,
+        Or_Equal_Node,
+        And_Equal_Node,
+        Shift_Left_Equal_Node,
+        Shift_Right_Equal_Node,
+        Return_Node,
+        Decl_Assign_Node,
+        Decl_Node,
+    },
 }
 
 Function_Node :: struct {
-    using base: Node_Base,
     name: string,
-    body: [dynamic]Statement_Node,
-}
-
-Expr_Node :: union {
-    ^Int_Constant_Node,
-    ^Ident_Node,
-    ^Unary_Op_Node,
-    ^Binary_Op_Node,
-    ^Assign_Op_Node,
+    body: [dynamic]^Ast_Node,
 }
 
 Int_Constant_Node :: struct {
-    using base: Node_Base,
     value: int,
 }
 
 Ident_Node :: struct {
-    using base: Node_Base,
     var_name: string,
 }
 
-Unary_Op_Type :: enum {
-    Negate,
-    BinaryNegate,
-    BoolNegate,
+Negate_Node :: struct {
+    expr: ^Ast_Node,
 }
 
-Unary_Op_Node :: struct {
-    using base: Node_Base,
-    type: Unary_Op_Type,
-    expr: Expr_Node,
+Bit_Negate_Node :: distinct Negate_Node
+Boolean_Negate_Node :: distinct Negate_Node
+Pre_Decrement_Node :: distinct Negate_Node
+Pre_Increment_Node :: distinct Negate_Node
+Post_Decrement_Node :: distinct Negate_Node
+Post_Increment_Node :: distinct Negate_Node
+
+Add_Node :: struct {
+    left: ^Ast_Node,
+    right: ^Ast_Node,
 }
 
-Binary_Op_Type :: enum {
-    Add,
-    Subtract,
-    Multiply,
-    Modulo,
-    Divide,
-    BoolAnd,
-    BoolOr,
-    BoolEqual,
-    BoolNotEqual,
-    BoolLess,
-    BoolLessEqual,
-    BoolMore,
-    BoolMoreEqual,
-    BitAnd,
-    BitOr,
-    BitXor,
-    ShiftLeft,
-    ShiftRight,
+Subtract_Node :: distinct Add_Node
+Multiply_Node :: distinct Add_Node
+Modulo_Node :: distinct Add_Node
+Divide_Node :: distinct Add_Node
+Boolean_And_Node :: distinct Add_Node
+Boolean_Or_Node :: distinct Add_Node
+Boolean_Equal_Node :: distinct Add_Node
+Boolean_Not_Equal_Node :: distinct Add_Node
+Less_Node :: distinct Add_Node
+Less_Equal_Node :: distinct Add_Node
+More_Node :: distinct Add_Node
+More_Equal_Node :: distinct Add_Node
+Bit_And_Node :: distinct Add_Node
+Bit_Or_Node :: distinct Add_Node
+Bit_Xor_Node :: distinct Add_Node
+Shift_Left_Node :: distinct Add_Node
+Shift_Right_Node :: distinct Add_Node
+
+Equal_Node :: struct {
+    left: ^Ast_Node,
+    right: ^Ast_Node,
 }
 
-Binary_Op_Node :: struct {
-    using base: Node_Base,
-    type: Binary_Op_Type,
-    left: Expr_Node,
-    right: Expr_Node,
-}
-
-Assign_Op_Type :: enum {
-    Equal,
-    PlusEqual,
-    MinusEqual,
-    TimesEqual,
-    DivideEqual,
-    ModEqual,
-    XorEqual,
-    OrEqual,
-    AndEqual,
-    ShiftLeftEqual,
-    ShiftRightEqual,
-}
-
-Assign_Op_Node :: struct {
-    using base: Node_Base,
-    type: Assign_Op_Type,
-    left: ^Ident_Node,
-    right: Expr_Node,
-}
-
-Statement_Node :: union {
-    ^Return_Node,
-    ^Decl_Assign_Node,
-    ^Decl_Node,
-    Expr_Node,
-}
+Plus_Equal_Node :: distinct Equal_Node
+Minus_Equal_Node :: distinct Equal_Node
+Times_Equal_Node :: distinct Equal_Node
+Divide_Equal_Node :: distinct Equal_Node
+Modulo_Equal_Node :: distinct Equal_Node
+Xor_Equal_Node :: distinct Equal_Node
+Or_Equal_Node :: distinct Equal_Node
+And_Equal_Node :: distinct Equal_Node
+Shift_Left_Equal_Node :: distinct Equal_Node
+Shift_Right_Equal_Node :: distinct Equal_Node
 
 Return_Node :: struct {
-    using base: Node_Base,
-    expr: Expr_Node,
+    expr: ^Ast_Node,
 }
 
 Decl_Assign_Node :: struct {
-    using base: Node_Base,
     var_name: string,
-    right: Expr_Node,
+    right: ^Ast_Node,
 }
 
 Decl_Node :: struct {
-    using base: Node_Base,
-    var_name: string,
+    var_name: string 
+}
+
+make_node_1 :: proc($T: typeid, inner: $I) -> ^Ast_Node {
+    node := new(Ast_Node)
+    node.variant = T{inner}
+    return node
+}
+
+make_node_2 :: proc($T: typeid, first: $F, second: $S) -> ^Ast_Node {
+    node := new(Ast_Node)
+    node.variant = T{first, second}
+    return node
 }
 
 // Printing functions for debugging
@@ -125,121 +152,40 @@ print_indent :: proc(indent: int) {
     }
 }
 
-pretty_print_unary_op_node :: proc(op: Unary_Op_Node, indent := 0) {
+pretty_print_node :: proc(node: Ast_Node, indent := 0) {
     print_indent(indent)
 
-    switch op.type {
-        case .Negate:
-            fmt.printfln("negate(")
-            pretty_print_expr_node(op.expr, indent + 1)
-            print_indent(indent)
-            fmt.println(")")
+    node_struct_id := reflect.union_variant_typeid(node.variant)
+    node_struct_info := type_info_of(node_struct_id).variant.(runtime.Type_Info_Named)
+    fmt.printf("%v(", node_struct_info.name)
 
-        case .BoolNegate:
-            fmt.printfln("bool_negate(")
-            pretty_print_expr_node(op.expr, indent + 1)
-            print_indent(indent)
-            fmt.println(")")
-
-        case .BinaryNegate:
-            fmt.printfln("binary_negate(")
-            pretty_print_expr_node(op.expr, indent + 1)
-            print_indent(indent)
-            fmt.println(")")
-    }
-}
-
-pretty_print_binary_op_node :: proc(op: Binary_Op_Node, indent := 0) {
-    print_indent(indent)
-    fmt.printfln("%s(left=(", op.type)
-    pretty_print_expr_node(op.left, indent + 1)
-    print_indent(indent)
-    fmt.println("), right=(")
-    pretty_print_expr_node(op.right, indent + 1)
-    print_indent(indent)
-    fmt.println(")")
-}
-
-pretty_print_expr_node :: proc(expr: Expr_Node, indent := 0) {
-
-    switch e in expr {
-        case ^Int_Constant_Node:
-            print_indent(indent)
-            fmt.printfln("IntConstant(value=%v)", e.value)
-
-        case ^Ident_Node:
-            print_indent(indent)
-            fmt.printfln("Ident(var_name=%v)", e.var_name)
-
-        case ^Unary_Op_Node:
-            pretty_print_unary_op_node(e^, indent)
-
-        case ^Binary_Op_Node:
-            pretty_print_binary_op_node(e^, indent)
-
-        case ^Assign_Op_Node:
-            pretty_print_assign_op_node(e^, indent)
-    }
-}
-
-pretty_print_assign_op_node :: proc(assign_op: Assign_Op_Node, indent := 0) {
-    print_indent(indent)
-    fmt.printfln("%s(left=(", assign_op.type)
-    pretty_print_expr_node(assign_op.left, indent + 1)
-    print_indent(indent)
-    fmt.println("), right=(")
-    pretty_print_expr_node(assign_op.right, indent + 1)
-    print_indent(indent)
-    fmt.println("))")
-}
-
-pretty_print_statement_node :: proc(statement: Statement_Node, indent := 0) {
-
-    switch stmt in statement {
-        case ^Return_Node:
-            print_indent(indent)
-            fmt.print("return(")
-            if stmt.expr == nil {
-                fmt.println(")")
-            }
-            else {
-                fmt.println("expr=")
-                pretty_print_expr_node(stmt.expr, indent + 1)
+    node_variant := reflect.get_union_variant(node.variant)
+    for field_name, i in reflect.struct_field_names(node_struct_id) {
+        if i > 0 do fmt.print(", ")
+        fmt.printf("%v=", field_name)
+        switch v in reflect.struct_field_value_by_name(node_variant, field_name) {
+            case ^Ast_Node:
+                fmt.println("(")
+                pretty_print_node(v^, indent + 1)
+                fmt.println()
                 print_indent(indent)
-                fmt.println(")")
-            }
+                fmt.print(")")
 
-        case ^Decl_Node:
-            print_indent(indent)
-            fmt.printfln("Decl(var_name=%v)", stmt.var_name)
+            case [dynamic]^Ast_Node:
+                fmt.println("(")
+                for node, i in v {
+                    if i > 0 do fmt.println(",")
+                    pretty_print_node(node^, indent + 1)
+                }
+                fmt.println()
+                print_indent(indent)
+                fmt.print(")")
 
-        case ^Decl_Assign_Node:
-            print_indent(indent)
-            fmt.printfln("DeclAssign(var_name=%v, right=(", stmt.var_name)
-            pretty_print_expr_node(stmt.right, indent + 1)
-            print_indent(indent)
-            fmt.println("))")
-
-        case Expr_Node:
-            pretty_print_expr_node(stmt, indent)
-    }
-}
-
-pretty_print_function_node :: proc(function: Function_Node, indent := 0) {
-    print_indent(indent)
-    fmt.printf("function(name=%v", function.name)
-
-    if len(function.body) == 0 {
-        fmt.println(")")
-    }
-    else {
-        fmt.println(", body=(")
-        for statement in function.body {
-            pretty_print_statement_node(statement, indent + 1)
+            case:
+                fmt.printf("%v", v)
         }
-        print_indent(indent)
-        fmt.println(")")
     }
+    fmt.print(")")
 }
 
 pretty_print_program :: proc(program: Program) {
@@ -249,7 +195,7 @@ pretty_print_program :: proc(program: Program) {
     else {
         fmt.println("program(")
         for child in program.children {
-            pretty_print_function_node(child^, 1)
+            pretty_print_node(child^, 1)
         }
         fmt.println(")")
     }

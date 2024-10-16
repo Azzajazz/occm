@@ -379,6 +379,11 @@ take_first_token :: proc(tokens: []Token) -> (token: Token, rest: []Token) {
     return slice.split_first(tokens)
 }
 
+peek_first_token :: proc(tokens: []Token) -> Token {
+    if len(tokens) == 0 do parse_error({}, {})
+    return tokens[0]
+}
+
 parse_error :: proc(current: Token, rest: []Token, location := #caller_location) {
     fmt.printfln("Unsuccessful parse in %v:%v", location.procedure, location.line)
     fmt.printfln("Current token: %v", current)
@@ -386,51 +391,75 @@ parse_error :: proc(current: Token, rest: []Token, location := #caller_location)
     os.exit(3)
 }
 
-parse_expression_leaf :: proc(tokens: []Token) -> (Expr_Node, []Token) {
+parse_expression_leaf :: proc(tokens: []Token) -> (^Ast_Node, []Token) {
+    token := peek_first_token(tokens)
     tokens := tokens
-    token: Token = ---
 
-    token, tokens = take_first_token(tokens)
     #partial switch token.type {
-        case .IntConstant:
-            expr := new(Int_Constant_Node)
-            expr.value = token.data.(int)
-            return expr, tokens
-
-        case .Ident:
-            expr := new(Ident_Node)
-            expr.var_name = token.text
-            return expr, tokens
-
         case .Minus:
-            expr := new(Unary_Op_Node)
-            expr.type = .Negate
-            expr.expr, tokens = parse_expression_leaf(tokens)
-            return expr, tokens
-
-        case .Bang:
-            expr := new(Unary_Op_Node)
-            expr.type = .BoolNegate
-            expr.expr, tokens = parse_expression_leaf(tokens)
-            return expr, tokens
+            inner: ^Ast_Node = ---
+            inner, tokens = parse_expression_leaf(tokens[1:])
+            return make_node_1(Negate_Node, inner), tokens
 
         case .Tilde:
-            expr := new(Unary_Op_Node)
-            expr.type = .BinaryNegate
-            expr.expr, tokens = parse_expression_leaf(tokens)
-            return expr, tokens
+            inner: ^Ast_Node = ---
+            inner, tokens = parse_expression_leaf(tokens[1:])
+            return make_node_1(Bit_Negate_Node, inner), tokens
+
+        case .Bang:
+            inner: ^Ast_Node = ---
+            inner, tokens = parse_expression_leaf(tokens[1:])
+            return make_node_1(Boolean_Negate_Node, inner), tokens
+
+        case .MinusMinus:
+            inner: ^Ast_Node = ---
+            inner, tokens = parse_expression_leaf(tokens[1:])
+            return make_node_1(Pre_Decrement_Node, inner), tokens
+
+        case .PlusPlus:
+            inner: ^Ast_Node = ---
+            inner, tokens = parse_expression_leaf(tokens[1:])
+            return make_node_1(Pre_Increment_Node, inner), tokens
+
+        case .IntConstant:
+            inner := make_node_1(Int_Constant_Node, token.data.(int))
+            return parse_postfix_operators(inner, tokens[1:])
+
+        case .Ident:
+            inner := make_node_1(Ident_Node, token.text)
+            return parse_postfix_operators(inner, tokens[1:])
 
         case .LParen:
-            expr: Expr_Node = ---
-            expr, tokens = parse_expression(tokens)
-            if tokens[0].type != .RParen do parse_error(token, tokens)
-            return expr, tokens[1:] // Remove the )
+            expr: ^Ast_Node = ---
+            expr, tokens = parse_expression(tokens[1:])
+            token, tokens = take_first_token(tokens)
+            if token.type != .RParen do parse_error(token, tokens)
+            return parse_postfix_operators(expr, tokens)
 
         case:
             parse_error(token, tokens)
     }
 
     panic("Unreachable")
+}
+
+parse_postfix_operators :: proc(inner: ^Ast_Node, tokens: []Token) -> (^Ast_Node, []Token) {
+    inner := inner
+    tokens := tokens
+
+    for token := peek_first_token(tokens); token.type == .PlusPlus || token.type == .MinusMinus; token = peek_first_token(tokens) {
+        if token.type == .PlusPlus {
+            op := make_node_1(Post_Increment_Node, inner)
+            inner = op
+        }
+        else {
+            op := make_node_1(Post_Decrement_Node, inner)
+            inner = op
+        }
+        tokens = tokens[1:]
+    }
+
+    return inner, tokens
 }
 
 op_precs := map[Token_Type]int {
@@ -501,156 +530,147 @@ assign_ops := bit_set[Token_Type] {
     .MoreMoreEqual,
 }
 
-make_binary_op_node :: proc(type: Token_Type) -> ^Binary_Op_Node {
-    expr := new(Binary_Op_Node)
+make_binary_op_node :: proc(type: Token_Type, left: ^Ast_Node, right: ^Ast_Node) -> ^Ast_Node {
+    node := new(Ast_Node)
+
     #partial switch type {
         case .Minus:
-            expr.type = .Subtract
+            node.variant = Subtract_Node{left, right}
 
         case .Plus:
-            expr.type = .Add
+            node.variant = Add_Node{left, right} 
 
         case .Star:
-            expr.type = .Multiply
+            node.variant = Multiply_Node{left, right}
 
         case .Percent:
-            expr.type = .Modulo
+            node.variant = Modulo_Node{left, right}
 
         case .ForwardSlash:
-            expr.type = .Divide
+            node.variant = Divide_Node{left, right}
 
         case .DoubleAnd:
-            expr.type = .BoolAnd
+            node.variant = Boolean_And_Node{left, right}
 
         case .DoublePipe:
-            expr.type = .BoolOr
+            node.variant = Boolean_Or_Node{left, right}
 
         case .DoubleEqual:
-            expr.type = .BoolEqual
+            node.variant = Boolean_Equal_Node{left, right}
 
         case .BangEqual:
-            expr.type = .BoolNotEqual
+            node.variant = Boolean_Not_Equal_Node{left, right}
 
         case .LessEqual:
-            expr.type = .BoolLessEqual
+            node.variant = Less_Equal_Node{left, right}
 
         case .Less:
-            expr.type = .BoolLess
+            node.variant = Less_Node{left, right}
 
         case .MoreEqual:
-            expr.type = .BoolMoreEqual
+            node.variant = More_Equal_Node{left, right}
 
         case .More:
-            expr.type = .BoolMore
+            node.variant = More_Node{left, right}
 
         case .And:
-            expr.type = .BitAnd
+            node.variant = Bit_And_Node{left, right}
 
         case .Pipe:
-            expr.type = .BitOr
+            node.variant = Bit_Or_Node{left, right}
 
         case .Carat:
-            expr.type = .BitXor
+            node.variant = Bit_Xor_Node{left, right}
 
         case .LessLess:
-            expr.type = .ShiftLeft
+            node.variant = Shift_Left_Node{left, right}
 
         case .MoreMore:
-            expr.type = .ShiftRight
+            node.variant = Shift_Right_Node{left, right}
 
-        case:
-            fmt.eprintln(type)
-            panic("Not a valid binary operator")
-    }
-
-    return expr 
-}
-
-make_assign_op_node :: proc(type: Token_Type) -> ^Assign_Op_Node {
-    node := new(Assign_Op_Node)
-
-    #partial switch type {
         case .Equal:
-            node.type = .Equal
+            node.variant = Equal_Node{left, right}
 
         case .PlusEqual:
-            node.type = .PlusEqual
+            node.variant = Plus_Equal_Node{left, right}
 
         case .MinusEqual:
-            node.type = .MinusEqual
+            node.variant = Minus_Equal_Node{left, right}
         
         case .StarEqual:
-            node.type = .TimesEqual
+            node.variant = Times_Equal_Node{left, right}
 
         case .SlashEqual:
-            node.type = .DivideEqual
+            node.variant = Divide_Equal_Node{left, right}
 
         case .PercentEqual:
-            node.type = .ModEqual
+            node.variant = Modulo_Equal_Node{left, right}
 
         case .CaratEqual:
-            node.type = .XorEqual
+            node.variant = Xor_Equal_Node{left, right}
 
         case .PipeEqual:
-            node.type = .OrEqual
+            node.variant = Or_Equal_Node{left, right}
 
         case .AndEqual:
-            node.type = .AndEqual
+            node.variant = And_Equal_Node{left, right}
 
         case .LessLessEqual:
-            node.type = .ShiftLeftEqual
+            node.variant = Shift_Left_Equal_Node{left, right}
 
         case .MoreMoreEqual:
-            node.type = .ShiftRightEqual
+            node.variant = Shift_Right_Equal_Node{left, right}
 
         case:
             fmt.eprintln(type)
-            panic("Not a valid compound operator!")
+            panic("Not a valid binary operator!")
     }
 
-    return node
+    return node 
 }
 
-parse_expression :: proc(tokens: []Token, min_prec := 0) -> (Expr_Node, []Token) {
+parse_expression :: proc(tokens: []Token, min_prec := 0) -> (^Ast_Node, []Token) {
     leaf, tokens := parse_expression_leaf(tokens)
+    token := peek_first_token(tokens)
 
-    for ((tokens[0].type in assign_ops) || (tokens[0].type in bin_ops)) && op_precs[tokens[0].type] >= min_prec {
-        if (tokens[0].type in assign_ops) {
-            ident, is_ident := leaf.(^Ident_Node)
+    for (token.type in assign_ops || token.type in bin_ops) && op_precs[token.type] >= min_prec {
+        if (token.type in assign_ops) {
+            _, is_ident := leaf.variant.(Ident_Node)
             // @REVISIT: This would be better separated into the semantic pass, but this requires an Assign_Op_Node
             // with a left that can be something other than an Ident_Node
             if !is_ident do semantic_error()
 
-            prec := op_precs[tokens[0].type]
-            op := make_assign_op_node(tokens[0].type)
-            op.left = ident 
-            op.right, tokens = parse_expression(tokens[1:], prec)
+            prec := op_precs[token.type]
+            right: ^Ast_Node = ---
+            right, tokens = parse_expression(tokens[1:], prec)
+            op := make_binary_op_node(token.type, leaf, right)
             leaf = op
         }
         else {
-            prec := op_precs[tokens[0].type]
-            op := make_binary_op_node(tokens[0].type)
+            prec := op_precs[token.type]
+            right: ^Ast_Node = ---
             // @TODO: Handle associativity here (see https://eli.thegreenplace.net/2012/08/02/parsing-expressions-by-precedence-climbing)
-            op.right, tokens = parse_expression(tokens[1:], prec + 1)
-            op.left = leaf
+            right, tokens = parse_expression(tokens[1:], prec + 1)
+            op := make_binary_op_node(token.type, leaf, right)
             leaf = op
         }
+
+        token = peek_first_token(tokens)
     }
 
     return leaf, tokens
 }
 
-parse_statement :: proc(tokens: []Token) -> (Statement_Node, []Token) {
+parse_statement :: proc(tokens: []Token) -> (^Ast_Node, []Token) {
     tokens := tokens
-    token: Token = ---
+    token := peek_first_token(tokens)
 
-    #partial switch tokens[0].type {
+    #partial switch token.type {
         case .ReturnKeyword:
-            token, tokens = take_first_token(tokens)
-            statement := new(Return_Node) 
-            expr: Expr_Node = ---
+            tokens = tokens[1:]
+            expr: ^Ast_Node = ---
             expr, tokens = parse_expression(tokens)
-            statement.expr = expr
+            statement := make_node_1(Return_Node, expr)
             token, tokens = take_first_token(tokens)
             if token.type != .Semicolon do parse_error(token, tokens)
             return statement, tokens
@@ -663,14 +683,13 @@ parse_statement :: proc(tokens: []Token) -> (Statement_Node, []Token) {
             token, tokens = take_first_token(tokens)
 
             if token.type == .Semicolon {
-                statement := new(Decl_Node)
-                statement.var_name = var_name
+                statement := make_node_1(Decl_Node, var_name)
                 return statement, tokens
             }
             else if token.type == .Equal {
-                statement := new(Decl_Assign_Node)
-                statement.var_name = var_name
-                statement.right, tokens = parse_expression(tokens)
+                right: ^Ast_Node = ---
+                right, tokens = parse_expression(tokens)
+                statement := make_node_2(Decl_Assign_Node, var_name, right)
                 token, tokens = take_first_token(tokens)
                 if token.type != .Semicolon do parse_error(token, tokens)
                 return statement, tokens
@@ -689,18 +708,16 @@ parse_statement :: proc(tokens: []Token) -> (Statement_Node, []Token) {
     panic("Unreachable")
 }
 
-parse_function :: proc(tokens: []Token) -> (^Function_Node, []Token) {
+parse_function :: proc(tokens: []Token) -> (^Ast_Node, []Token) {
     tokens := tokens
     token: Token = ---
-
-    function := new(Function_Node)
 
     token, tokens = take_first_token(tokens)
     if token.type != .IntKeyword do parse_error(token, tokens)
 
     token, tokens = take_first_token(tokens)
     if token.type != .Ident do parse_error(token, tokens)
-    function.name = token.text
+    name := token.text
 
     token, tokens = take_first_token(tokens)
     if token.type != .LParen do parse_error(token, tokens)
@@ -712,16 +729,16 @@ parse_function :: proc(tokens: []Token) -> (^Function_Node, []Token) {
     token, tokens = take_first_token(tokens)
     if token.type != .LBrace do parse_error(token, tokens)
 
-    function.body = make([dynamic]Statement_Node)
+    body := make([dynamic]^Ast_Node)
     for tokens[0].type != .RBrace {
         // Skip null statements
         if tokens[0].type == .Semicolon {
             tokens = tokens[1:]
             continue
         }
-        statement: Statement_Node = ---
+        statement: ^Ast_Node = ---
         statement, tokens = parse_statement(tokens)
-        append(&function.body, statement)
+        append(&body, statement)
 
         if len(tokens) == 0 do parse_error({}, {})
     }
@@ -732,16 +749,16 @@ parse_function :: proc(tokens: []Token) -> (^Function_Node, []Token) {
     // @HACK: This will need to change when we parse multiple functions
     if len(tokens) > 0 do parse_error(token, tokens)
 
-    return function, tokens
+    return make_node_2(Function_Node, name, body), tokens
 }
 
 parse :: proc(tokens: []Token) -> Program {
     tokens := tokens
 
-    children := make([dynamic]^Function_Node)
+    children := make([dynamic]^Ast_Node)
 
     for len(tokens) > 0 {
-        function: ^Function_Node = ---
+        function: ^Ast_Node = ---
         function, tokens = parse_function(tokens)
         append(&children, function)
     }
@@ -763,7 +780,8 @@ semantic_error :: proc() {
 check_and_gather_variables :: proc(program: Program) -> map[string][dynamic]string {
     result := make(map[string][dynamic]string)
 
-    for function in program.children {
+    for node in program.children {
+        function := node.variant.(Function_Node)
         result[function.name] = make([dynamic]string)
         check_and_gather_function_variables(function, &result[function.name])
     }
@@ -771,39 +789,132 @@ check_and_gather_variables :: proc(program: Program) -> map[string][dynamic]stri
     return result
 }
 
-check_and_gather_function_variables :: proc(function: ^Function_Node, vars: ^[dynamic]string) {
+check_and_gather_function_variables :: proc(function: Function_Node, vars: ^[dynamic]string) {
     for statement in function.body {
-        #partial switch stmt in statement {
-            case Expr_Node:
-                validate_expr(stmt, vars)
-
-            case ^Return_Node:
+        #partial switch stmt in statement.variant {
+            case Return_Node:
                 validate_expr(stmt.expr, vars)
 
-            case ^Decl_Node:
+            case Decl_Node:
                 if contains_variable(stmt.var_name, vars) do semantic_error()
                 append(vars, stmt.var_name)
 
-            case ^Decl_Assign_Node:
+            case Decl_Assign_Node:
                 if contains_variable(stmt.var_name, vars) do semantic_error()
                 append(vars, stmt.var_name)
+
+            case:
+                validate_expr(statement, vars)
         }
     }
 }
 
-validate_expr :: proc(expr: Expr_Node, vars: ^[dynamic]string) {
-    #partial switch e in expr {
-        case ^Ident_Node:
+validate_expr :: proc(expr: ^Ast_Node, vars: ^[dynamic]string) {
+    #partial switch e in expr.variant {
+        case Ident_Node:
             if !contains_variable(e.var_name, vars) do semantic_error()
 
-        case ^Unary_Op_Node:
+        case Negate_Node: validate_expr(e.expr, vars)
+        case Bit_Negate_Node: validate_expr(e.expr, vars)
+        case Boolean_Negate_Node: validate_expr(e.expr, vars)
+        case Pre_Decrement_Node:
+            if _, is_ident := e.expr.variant.(Ident_Node); !is_ident do semantic_error()
+            validate_expr(e.expr, vars)
+        case Pre_Increment_Node:
+            if _, is_ident := e.expr.variant.(Ident_Node); !is_ident do semantic_error()
+            validate_expr(e.expr, vars)
+        case Post_Decrement_Node:
+            if _, is_ident := e.expr.variant.(Ident_Node); !is_ident do semantic_error()
+            validate_expr(e.expr, vars)
+        case Post_Increment_Node:
+            if _, is_ident := e.expr.variant.(Ident_Node); !is_ident do semantic_error()
             validate_expr(e.expr, vars)
 
-        case ^Binary_Op_Node:
+        case Add_Node:
             validate_expr(e.left, vars)
             validate_expr(e.right, vars)
-
-        case ^Assign_Op_Node:
+        case Subtract_Node:
+            validate_expr(e.left, vars)
+            validate_expr(e.right, vars)
+        case Multiply_Node:
+            validate_expr(e.left, vars)
+            validate_expr(e.right, vars)
+        case Modulo_Node:
+            validate_expr(e.left, vars)
+            validate_expr(e.right, vars)
+        case Divide_Node:
+            validate_expr(e.left, vars)
+            validate_expr(e.right, vars)
+        case Boolean_And_Node:
+            validate_expr(e.left, vars)
+            validate_expr(e.right, vars)
+        case Boolean_Or_Node:
+            validate_expr(e.left, vars)
+            validate_expr(e.right, vars)
+        case Boolean_Equal_Node:
+            validate_expr(e.left, vars)
+            validate_expr(e.right, vars)
+        case Boolean_Not_Equal_Node:
+            validate_expr(e.left, vars)
+            validate_expr(e.right, vars)
+        case Less_Node:
+            validate_expr(e.left, vars)
+            validate_expr(e.right, vars)
+        case Less_Equal_Node:
+            validate_expr(e.left, vars)
+            validate_expr(e.right, vars)
+        case More_Node:
+            validate_expr(e.left, vars)
+            validate_expr(e.right, vars)
+        case More_Equal_Node:
+            validate_expr(e.left, vars)
+            validate_expr(e.right, vars)
+        case Bit_And_Node:
+            validate_expr(e.left, vars)
+            validate_expr(e.right, vars)
+        case Bit_Or_Node:
+            validate_expr(e.left, vars)
+            validate_expr(e.right, vars)
+        case Bit_Xor_Node:
+            validate_expr(e.left, vars)
+            validate_expr(e.right, vars)
+        case Shift_Left_Node:
+            validate_expr(e.left, vars)
+            validate_expr(e.right, vars)
+        case Shift_Right_Node:
+            validate_expr(e.left, vars)
+            validate_expr(e.right, vars)
+        case Equal_Node:
+            validate_expr(e.left, vars)
+            validate_expr(e.right, vars)
+        case Plus_Equal_Node:
+            validate_expr(e.left, vars)
+            validate_expr(e.right, vars)
+        case Minus_Equal_Node:
+            validate_expr(e.left, vars)
+            validate_expr(e.right, vars)
+        case Times_Equal_Node:
+            validate_expr(e.left, vars)
+            validate_expr(e.right, vars)
+        case Divide_Equal_Node:
+            validate_expr(e.left, vars)
+            validate_expr(e.right, vars)
+        case Modulo_Equal_Node:
+            validate_expr(e.left, vars)
+            validate_expr(e.right, vars)
+        case Xor_Equal_Node:
+            validate_expr(e.left, vars)
+            validate_expr(e.right, vars)
+        case Or_Equal_Node:
+            validate_expr(e.left, vars)
+            validate_expr(e.right, vars)
+        case And_Equal_Node:
+            validate_expr(e.left, vars)
+            validate_expr(e.right, vars)
+        case Shift_Left_Equal_Node:
+            validate_expr(e.left, vars)
+            validate_expr(e.right, vars)
+        case Shift_Right_Equal_Node:
             validate_expr(e.left, vars)
             validate_expr(e.right, vars)
     }
@@ -821,52 +932,72 @@ emit_label :: proc(builder: ^strings.Builder, label := -1) {
     }
 }
 
-emit_unary_op :: proc(builder: ^strings.Builder, op: Unary_Op_Node, offsets: ^map[string]int) {
-    switch op.type {
-        case .Negate:
-            emit_expr(builder, op.expr, offsets)
+emit_unary_op :: proc(builder: ^strings.Builder, op: ^Ast_Node, offsets: ^map[string]int) {
+    #partial switch o in op.variant {
+        case Negate_Node:
+            emit_expr(builder, o.expr, offsets)
             fmt.sbprintln(builder, "  neg %eax")
 
-        case .BinaryNegate:
-            emit_expr(builder, op.expr, offsets)
+        case Bit_Negate_Node:
+            emit_expr(builder, o.expr, offsets)
             fmt.sbprintln(builder, "  not %eax")
 
-        case .BoolNegate:
-            emit_expr(builder, op.expr, offsets)
+        case Boolean_Negate_Node:
+            emit_expr(builder, o.expr, offsets)
             fmt.sbprintln(builder, "  cmp $0, %eax")
             fmt.sbprintln(builder, "  mov $0, %eax")
             fmt.sbprintln(builder, "  sete %al")
+
+        case Pre_Decrement_Node:
+            fmt.sbprintfln(builder, "  decl -%v(%%rbp)", offsets[o.expr.variant.(Ident_Node).var_name])
+            fmt.sbprintfln(builder, "  mov -%v(%%rbp), %%eax", offsets[o.expr.variant.(Ident_Node).var_name])
+
+        case Pre_Increment_Node:
+            fmt.sbprintfln(builder, "  incl -%v(%%rbp)", offsets[o.expr.variant.(Ident_Node).var_name])
+            fmt.sbprintfln(builder, "  mov -%v(%%rbp), %%eax", offsets[o.expr.variant.(Ident_Node).var_name])
+
+        case Post_Decrement_Node:
+            fmt.sbprintfln(builder, "  mov -%v(%%rbp), %%eax", offsets[o.expr.variant.(Ident_Node).var_name])
+            fmt.sbprintfln(builder, "  decl -%v(%%rbp)", offsets[o.expr.variant.(Ident_Node).var_name])
+
+        case Post_Increment_Node:
+            fmt.sbprintfln(builder, "  mov -%v(%%rbp), %%eax", offsets[o.expr.variant.(Ident_Node).var_name])
+            fmt.sbprintfln(builder, "  incl -%v(%%rbp)", offsets[o.expr.variant.(Ident_Node).var_name])
+
+        case:
+            fmt.println(op)
+            panic("Not a valid unary operator!")
     }
 }
 
-emit_binary_op :: proc(builder: ^strings.Builder, op: Binary_Op_Node, offsets: ^map[string]int) {
-    switch op.type {
-        case .Add:
-            emit_expr(builder, op.left, offsets)
+emit_binary_op :: proc(builder: ^strings.Builder, op: ^Ast_Node, offsets: ^map[string]int) {
+    #partial switch o in op.variant {
+        case Add_Node:
+            emit_expr(builder, o.left, offsets)
             fmt.sbprintln(builder, "  push %rax")
-            emit_expr(builder, op.right, offsets)
+            emit_expr(builder, o.right, offsets)
             fmt.sbprintln(builder, "  pop %rbx")
             fmt.sbprintln(builder, "  add %ebx, %eax")
         
-        case .Subtract:
-            emit_expr(builder, op.left, offsets)
+        case Subtract_Node:
+            emit_expr(builder, o.left, offsets)
             fmt.sbprintln(builder, "  push %rax")
-            emit_expr(builder, op.right, offsets)
+            emit_expr(builder, o.right, offsets)
             fmt.sbprintln(builder, "  pop %rbx")
             fmt.sbprintln(builder, "  sub %eax, %ebx")
             fmt.sbprintln(builder, "  mov %ebx, %eax")
 
-        case .Multiply:
-            emit_expr(builder, op.left, offsets)
+        case Multiply_Node:
+            emit_expr(builder, o.left, offsets)
             fmt.sbprintln(builder, "  push %rax")
-            emit_expr(builder, op.right, offsets)
+            emit_expr(builder, o.right, offsets)
             fmt.sbprintln(builder, "  pop %rbx")
             fmt.sbprintln(builder, "  imul %ebx")
 
-        case .Modulo:
-            emit_expr(builder, op.left, offsets)
+        case Modulo_Node:
+            emit_expr(builder, o.left, offsets)
             fmt.sbprintln(builder, "  push %rax")
-            emit_expr(builder, op.right, offsets)
+            emit_expr(builder, o.right, offsets)
             fmt.sbprintln(builder, "  pop %rbx")
             fmt.sbprintln(builder, "  xor %edx, %edx")
             fmt.sbprintln(builder, "  cmp $0, %ebx")
@@ -878,10 +1009,10 @@ emit_binary_op :: proc(builder: ^strings.Builder, op: Binary_Op_Node, offsets: ^
             fmt.sbprintln(builder, "  idiv %ecx")
             fmt.sbprintln(builder, "  mov %edx, %eax")
 
-        case .Divide:
-            emit_expr(builder, op.left, offsets)
+        case Divide_Node:
+            emit_expr(builder, o.left, offsets)
             fmt.sbprintln(builder, "  push %rax")
-            emit_expr(builder, op.right, offsets)
+            emit_expr(builder, o.right, offsets)
             fmt.sbprintln(builder, "  pop %rbx")
             fmt.sbprintln(builder, "  xor %edx, %edx")
             fmt.sbprintln(builder, "  cmp $0, %ebx")
@@ -892,250 +1023,293 @@ emit_binary_op :: proc(builder: ^strings.Builder, op: Binary_Op_Node, offsets: ^
             fmt.sbprintln(builder, "  mov %ebx, %eax")
             fmt.sbprintln(builder, "  idiv %ecx")
 
-        case .BoolAnd:
-            emit_expr(builder, op.left, offsets)
+        case Boolean_And_Node:
+            emit_expr(builder, o.left, offsets)
             fmt.sbprintln(builder, "  cmp $0, %eax")
             label := current_label
             current_label += 1
             fmt.sbprintfln(builder, "  je L%v", label)
-            emit_expr(builder, op.right, offsets)
+            emit_expr(builder, o.right, offsets)
             fmt.sbprintln(builder, "  cmp $0, %eax")
             fmt.sbprintfln(builder, "  je L%v", label)
             fmt.sbprintln(builder, "  mov $1, %eax")
             emit_label(builder, label)
 
-        case .BoolOr:
-            emit_expr(builder, op.left, offsets)
+        case Boolean_Or_Node:
+            emit_expr(builder, o.left, offsets)
             fmt.sbprintln(builder, "  cmp $0, %eax")
             label := current_label
             current_label += 2 
             fmt.sbprintfln(builder, "  jne L%v", label)
-            emit_expr(builder, op.right, offsets)
+            emit_expr(builder, o.right, offsets)
             fmt.sbprintln(builder, "  cmp $0, %eax")
             fmt.sbprintfln(builder, "  je L%v", label + 1)
             emit_label(builder, label)
             fmt.sbprintln(builder, "    mov $1, %eax")
             emit_label(builder, label + 1)
 
-        case .BoolEqual:
-            emit_expr(builder, op.left, offsets)
+        case Boolean_Equal_Node:
+            emit_expr(builder, o.left, offsets)
             fmt.sbprintln(builder, "  push %rax")
-            emit_expr(builder, op.right, offsets)
+            emit_expr(builder, o.right, offsets)
             fmt.sbprintln(builder, "  pop %rbx")
             fmt.sbprintln(builder, "  cmp %eax, %ebx")
             fmt.sbprintln(builder, "  mov $0, %eax")
             fmt.sbprintln(builder, "  sete %al")
 
-        case .BoolNotEqual:
-            emit_expr(builder, op.left, offsets)
+        case Boolean_Not_Equal_Node:
+            emit_expr(builder, o.left, offsets)
             fmt.sbprintln(builder, "  push %rax")
-            emit_expr(builder, op.right, offsets)
+            emit_expr(builder, o.right, offsets)
             fmt.sbprintln(builder, "  pop %rbx")
             fmt.sbprintln(builder, "  cmp %eax, %ebx")
             fmt.sbprintln(builder, "  mov $0, %eax")
             fmt.sbprintln(builder, "  setne %al")
 
-        case .BoolLess:
-            emit_expr(builder, op.left, offsets)
+        case Less_Node:
+            emit_expr(builder, o.left, offsets)
             fmt.sbprintln(builder, "  push %rax")
-            emit_expr(builder, op.right, offsets)
+            emit_expr(builder, o.right, offsets)
             fmt.sbprintln(builder, "  pop %rbx")
             fmt.sbprintln(builder, "  cmp %eax, %ebx")
             fmt.sbprintln(builder, "  mov $0, %eax")
             fmt.sbprintln(builder, "  setnge %al")
 
-        case .BoolLessEqual:
-            emit_expr(builder, op.left, offsets)
+        case Less_Equal_Node:
+            emit_expr(builder, o.left, offsets)
             fmt.sbprintln(builder, "  push %rax")
-            emit_expr(builder, op.right, offsets)
+            emit_expr(builder, o.right, offsets)
             fmt.sbprintln(builder, "  pop %rbx")
             fmt.sbprintln(builder, "  cmp %eax, %ebx")
             fmt.sbprintln(builder, "  mov $0, %eax")
             fmt.sbprintln(builder, "  setle %al")
 
-        case .BoolMore:
-            emit_expr(builder, op.left, offsets)
+        case More_Node:
+            emit_expr(builder, o.left, offsets)
             fmt.sbprintln(builder, "  push %rax")
-            emit_expr(builder, op.right, offsets)
+            emit_expr(builder, o.right, offsets)
             fmt.sbprintln(builder, "  pop %rbx")
             fmt.sbprintln(builder, "  cmp %eax, %ebx")
             fmt.sbprintln(builder, "  mov $0, %eax")
             fmt.sbprintln(builder, "  setnle %al")
 
-        case .BoolMoreEqual:
-            emit_expr(builder, op.left, offsets)
+        case More_Equal_Node:
+            emit_expr(builder, o.left, offsets)
             fmt.sbprintln(builder, "  push %rax")
-            emit_expr(builder, op.right, offsets)
+            emit_expr(builder, o.right, offsets)
             fmt.sbprintln(builder, "  pop %rbx")
             fmt.sbprintln(builder, "  cmp %eax, %ebx")
             fmt.sbprintln(builder, "  mov $0, %eax")
             fmt.sbprintln(builder, "  setge %al")
 
-        case .BitAnd:
-            emit_expr(builder, op.left, offsets)
+        case Bit_And_Node:
+            emit_expr(builder, o.left, offsets)
             fmt.sbprintln(builder, "  push %rax")
-            emit_expr(builder, op.right, offsets)
+            emit_expr(builder, o.right, offsets)
             fmt.sbprintln(builder, "  pop %rbx")
             fmt.sbprintln(builder, "  and %ebx, %eax")
 
-        case .BitOr:
-            emit_expr(builder, op.left, offsets)
+        case Bit_Or_Node:
+            emit_expr(builder, o.left, offsets)
             fmt.sbprintln(builder, "  push %rax")
-            emit_expr(builder, op.right, offsets)
+            emit_expr(builder, o.right, offsets)
             fmt.sbprintln(builder, "  pop %rbx")
             fmt.sbprintln(builder, "  or %ebx, %eax")
 
-        case .BitXor:
-            emit_expr(builder, op.left, offsets)
+        case Bit_Xor_Node:
+            emit_expr(builder, o.left, offsets)
             fmt.sbprintln(builder, "  push %rax")
-            emit_expr(builder, op.right, offsets)
+            emit_expr(builder, o.right, offsets)
             fmt.sbprintln(builder, "  pop %rbx")
             fmt.sbprintln(builder, "  xor %ebx, %eax")
 
         // @TODO: This will need some semantics passes, but we are skipping them for now until we have type checking since a lot of the semantics depends on this
-        case .ShiftLeft:
-            emit_expr(builder, op.left, offsets)
+        case Shift_Left_Node:
+            emit_expr(builder, o.left, offsets)
             fmt.sbprintln(builder, "  push %rax")
-            emit_expr(builder, op.right, offsets)
+            emit_expr(builder, o.right, offsets)
             fmt.sbprintln(builder, "  pop %rbx")
             fmt.sbprintln(builder, "  mov %eax, %ecx")
             fmt.sbprintln(builder, "  mov %ebx, %eax")
             fmt.sbprintln(builder, "  shl %cl, %eax")
 
-        case .ShiftRight:
-            emit_expr(builder, op.left, offsets)
+        case Shift_Right_Node:
+            emit_expr(builder, o.left, offsets)
             fmt.sbprintln(builder, "  push %rax")
-            emit_expr(builder, op.right, offsets)
+            emit_expr(builder, o.right, offsets)
             fmt.sbprintln(builder, "  pop %rbx")
             fmt.sbprintln(builder, "  mov %eax, %ecx")
             fmt.sbprintln(builder, "  mov %ebx, %eax")
             // @TODO: Whether this is a logical or arithmetic shift depends on the type of the left expression. Since we assume everything is a signed int for now,
             // we do an arithmetic shift right.
             fmt.sbprintln(builder, "  sar %cl, %eax")
+
+        case:
+            fmt.println(op)
+            panic("Not a valid binary operator!")
     }
 }
 
-emit_assign_op :: proc(builder: ^strings.Builder, op: Assign_Op_Node, offsets: ^map[string]int) {
-    switch op.type {
-        case .Equal:
-            emit_expr(builder, op.right, offsets)
-            fmt.sbprintfln(builder, "  mov %%eax, -%v(%%rbp)", offsets[op.left.var_name])
+emit_assign_op :: proc(builder: ^strings.Builder, op: ^Ast_Node, offsets: ^map[string]int) {
+    #partial switch o in op.variant {
+        case Equal_Node:
+            emit_expr(builder, o.right, offsets)
+            fmt.sbprintfln(builder, "  mov %%eax, -%v(%%rbp)", offsets[o.left.variant.(Ident_Node).var_name])
 
-        case .PlusEqual:
-            emit_expr(builder, op.right, offsets)
-            fmt.sbprintfln(builder, "  mov -%v(%%rbp), %%ebx", offsets[op.left.var_name])
+        case Plus_Equal_Node:
+            emit_expr(builder, o.right, offsets)
+            fmt.sbprintfln(builder, "  mov -%v(%%rbp), %%ebx", offsets[o.left.variant.(Ident_Node).var_name])
             fmt.sbprintln(builder, "  add %ebx, %eax")
-            fmt.sbprintfln(builder, "  mov %%eax, -%v(%%rbp)", offsets[op.left.var_name])
+            fmt.sbprintfln(builder, "  mov %%eax, -%v(%%rbp)", offsets[o.left.variant.(Ident_Node).var_name])
             
-        case .MinusEqual:
-            emit_expr(builder, op.right, offsets)
+        case Minus_Equal_Node:
+            emit_expr(builder, o.right, offsets)
             fmt.sbprintln(builder, "  mov %eax, %ebx")
-            fmt.sbprintfln(builder, "  mov -%v(%%rbp), %%eax", offsets[op.left.var_name])
+            fmt.sbprintfln(builder, "  mov -%v(%%rbp), %%eax", offsets[o.left.variant.(Ident_Node).var_name])
             fmt.sbprintln(builder, "  sub %ebx, %eax")
-            fmt.sbprintfln(builder, "  mov %%eax, -%v(%%rbp)", offsets[op.left.var_name])
+            fmt.sbprintfln(builder, "  mov %%eax, -%v(%%rbp)", offsets[o.left.variant.(Ident_Node).var_name])
 
-        case .TimesEqual:
-            emit_expr(builder, op.right, offsets)
-            fmt.sbprintfln(builder, "  mov -%v(%%rbp), %%ebx", offsets[op.left.var_name])
+        case Times_Equal_Node:
+            emit_expr(builder, o.right, offsets)
+            fmt.sbprintfln(builder, "  mov -%v(%%rbp), %%ebx", offsets[o.left.variant.(Ident_Node).var_name])
             fmt.sbprintln(builder, "  imul %ebx, %eax")
-            fmt.sbprintfln(builder, "  mov %%eax, -%v(%%rbp)", offsets[op.left.var_name])
+            fmt.sbprintfln(builder, "  mov %%eax, -%v(%%rbp)", offsets[o.left.variant.(Ident_Node).var_name])
 
-        case .DivideEqual:
-            emit_expr(builder, op.right, offsets)
+        case Divide_Equal_Node:
+            emit_expr(builder, o.right, offsets)
             fmt.sbprintln(builder, "  mov %eax, %ebx")
-            fmt.sbprintfln(builder, "  mov -%v(%%rbp), %%eax", offsets[op.left.var_name])
+            fmt.sbprintfln(builder, "  mov -%v(%%rbp), %%eax", offsets[o.left.variant.(Ident_Node).var_name])
             fmt.sbprintln(builder, "  xor %edx, %edx")
             fmt.sbprintln(builder, "  cmp $0, %eax")
             fmt.sbprintfln(builder, "  jge L%v", current_label)
             fmt.sbprintln(builder, "  dec %edx")
             emit_label(builder)
             fmt.sbprintln(builder, "  idiv %ebx")
-            fmt.sbprintfln(builder, "  mov %%eax, -%v(%%rbp)", offsets[op.left.var_name])
+            fmt.sbprintfln(builder, "  mov %%eax, -%v(%%rbp)", offsets[o.left.variant.(Ident_Node).var_name])
 
-        case .ModEqual:
-            emit_expr(builder, op.right, offsets)
+        case Modulo_Equal_Node:
+            emit_expr(builder, o.right, offsets)
             fmt.sbprintln(builder, "  mov %eax, %ebx")
-            fmt.sbprintfln(builder, "  mov -%v(%%rbp), %%eax", offsets[op.left.var_name])
+            fmt.sbprintfln(builder, "  mov -%v(%%rbp), %%eax", offsets[o.left.variant.(Ident_Node).var_name])
             fmt.sbprintln(builder, "  xor %edx, %edx")
             fmt.sbprintln(builder, "  cmp $0, %ebx")
             fmt.sbprintfln(builder, "  jge L%v", current_label)
             fmt.sbprintln(builder, "  dec %edx")
             emit_label(builder)
             fmt.sbprintln(builder, "  idiv %ebx")
-            fmt.sbprintfln(builder, "  mov %%edx, -%v(%%rbp)", offsets[op.left.var_name])
+            fmt.sbprintfln(builder, "  mov %%edx, -%v(%%rbp)", offsets[o.left.variant.(Ident_Node).var_name])
             fmt.sbprintln(builder, "  mov %edx, %eax")
 
-        case .XorEqual:
-            emit_expr(builder, op.right, offsets)
-            fmt.sbprintfln(builder, "  mov -%v(%%rbp), %%ebx", offsets[op.left.var_name])
+        case Xor_Equal_Node:
+            emit_expr(builder, o.right, offsets)
+            fmt.sbprintfln(builder, "  mov -%v(%%rbp), %%ebx", offsets[o.left.variant.(Ident_Node).var_name])
             fmt.sbprintln(builder, "  xor %ebx, %eax")
-            fmt.sbprintfln(builder, "  mov %%eax, -%v(%%rbp)", offsets[op.left.var_name])
+            fmt.sbprintfln(builder, "  mov %%eax, -%v(%%rbp)", offsets[o.left.variant.(Ident_Node).var_name])
 
-        case .OrEqual:
-            emit_expr(builder, op.right, offsets)
-            fmt.sbprintfln(builder, "  mov -%v(%%rbp), %%ebx", offsets[op.left.var_name])
+        case Or_Equal_Node:
+            emit_expr(builder, o.right, offsets)
+            fmt.sbprintfln(builder, "  mov -%v(%%rbp), %%ebx", offsets[o.left.variant.(Ident_Node).var_name])
             fmt.sbprintln(builder, "  or %ebx, %eax")
-            fmt.sbprintfln(builder, "  mov %%eax, -%v(%%rbp)", offsets[op.left.var_name])
+            fmt.sbprintfln(builder, "  mov %%eax, -%v(%%rbp)", offsets[o.left.variant.(Ident_Node).var_name])
 
-        case .AndEqual:
-            emit_expr(builder, op.right, offsets)
-            fmt.sbprintfln(builder, "  mov -%v(%%rbp), %%ebx", offsets[op.left.var_name])
+        case And_Equal_Node:
+            emit_expr(builder, o.right, offsets)
+            fmt.sbprintfln(builder, "  mov -%v(%%rbp), %%ebx", offsets[o.left.variant.(Ident_Node).var_name])
             fmt.sbprintln(builder, "  and %ebx, %eax")
-            fmt.sbprintfln(builder, "  mov %%eax, -%v(%%rbp)", offsets[op.left.var_name])
+            fmt.sbprintfln(builder, "  mov %%eax, -%v(%%rbp)", offsets[o.left.variant.(Ident_Node).var_name])
 
-        case .ShiftLeftEqual:
-            emit_expr(builder, op.right, offsets)
+        case Shift_Left_Equal_Node:
+            emit_expr(builder, o.right, offsets)
             fmt.sbprintln(builder, "  mov %eax, %ecx")
-            fmt.sbprintfln(builder, "  mov -%v(%%rbp), %%eax", offsets[op.left.var_name])
+            fmt.sbprintfln(builder, "  mov -%v(%%rbp), %%eax", offsets[o.left.variant.(Ident_Node).var_name])
             fmt.sbprintln(builder, "  shl %cl, %eax")
-            fmt.sbprintfln(builder, "  mov %%eax, -%v(%%rbp)", offsets[op.left.var_name])
+            fmt.sbprintfln(builder, "  mov %%eax, -%v(%%rbp)", offsets[o.left.variant.(Ident_Node).var_name])
 
-        case .ShiftRightEqual:
-            emit_expr(builder, op.right, offsets)
+        case Shift_Right_Equal_Node:
+            emit_expr(builder, o.right, offsets)
             fmt.sbprintln(builder, "  mov %eax, %ecx")
-            fmt.sbprintfln(builder, "  mov -%v(%%rbp), %%eax", offsets[op.left.var_name])
+            fmt.sbprintfln(builder, "  mov -%v(%%rbp), %%eax", offsets[o.left.variant.(Ident_Node).var_name])
             fmt.sbprintln(builder, "  shr %cl, %eax")
-            fmt.sbprintfln(builder, "  mov %%eax, -%v(%%rbp)", offsets[op.left.var_name])
+            fmt.sbprintfln(builder, "  mov %%eax, -%v(%%rbp)", offsets[o.left.variant.(Ident_Node).var_name])
+
+        case:
+            fmt.println(op)
+            panic("Not a valid assignment operator!")
     }
 }
 
-emit_expr :: proc(builder: ^strings.Builder, expr: Expr_Node, offsets: ^map[string]int) {
-    switch e in expr {
-        case ^Int_Constant_Node:
+emit_expr :: proc(builder: ^strings.Builder, expr: ^Ast_Node, offsets: ^map[string]int) {
+    #partial switch e in expr.variant {
+        case Int_Constant_Node:
             fmt.sbprintfln(builder, "  mov $%v, %%eax", e.value)
 
-        case ^Ident_Node:
+        case Ident_Node:
             fmt.sbprintfln(builder, "  mov -%v(%%rbp), %%eax", offsets[e.var_name])
 
-        case ^Unary_Op_Node:
-            emit_unary_op(builder, e^, offsets)
+        case Negate_Node: emit_unary_op(builder, expr, offsets)
+        case Bit_Negate_Node: emit_unary_op(builder, expr, offsets)
+        case Boolean_Negate_Node: emit_unary_op(builder, expr, offsets)
+        case Pre_Decrement_Node: emit_unary_op(builder, expr, offsets)
+        case Pre_Increment_Node: emit_unary_op(builder, expr, offsets)
+        case Post_Decrement_Node: emit_unary_op(builder, expr, offsets)
+        case Post_Increment_Node: emit_unary_op(builder, expr, offsets)
+            
 
-        case ^Binary_Op_Node:
-            emit_binary_op(builder, e^, offsets)
+        case Add_Node: emit_binary_op(builder, expr, offsets)
+        case Subtract_Node: emit_binary_op(builder, expr, offsets)
+        case Multiply_Node: emit_binary_op(builder, expr, offsets)
+        case Modulo_Node: emit_binary_op(builder, expr, offsets)
+        case Divide_Node: emit_binary_op(builder, expr, offsets)
+        case Boolean_And_Node: emit_binary_op(builder, expr, offsets)
+        case Boolean_Or_Node: emit_binary_op(builder, expr, offsets)
+        case Boolean_Equal_Node: emit_binary_op(builder, expr, offsets)
+        case Boolean_Not_Equal_Node: emit_binary_op(builder, expr, offsets)
+        case Less_Node: emit_binary_op(builder, expr, offsets)
+        case Less_Equal_Node: emit_binary_op(builder, expr, offsets)
+        case More_Node: emit_binary_op(builder, expr, offsets)
+        case More_Equal_Node: emit_binary_op(builder, expr, offsets)
+        case Bit_And_Node: emit_binary_op(builder, expr, offsets)
+        case Bit_Or_Node: emit_binary_op(builder, expr, offsets)
+        case Bit_Xor_Node: emit_binary_op(builder, expr, offsets)
+        case Shift_Left_Node: emit_binary_op(builder, expr, offsets)
+        case Shift_Right_Node: emit_binary_op(builder, expr, offsets)
 
-        case ^Assign_Op_Node:
-            emit_assign_op(builder, e^, offsets)
+        case Equal_Node: emit_assign_op(builder, expr, offsets)
+        case Plus_Equal_Node: emit_assign_op(builder, expr, offsets)
+        case Minus_Equal_Node: emit_assign_op(builder, expr, offsets)
+        case Times_Equal_Node: emit_assign_op(builder, expr, offsets)
+        case Divide_Equal_Node: emit_assign_op(builder, expr, offsets)
+        case Modulo_Equal_Node: emit_assign_op(builder, expr, offsets)
+        case Xor_Equal_Node: emit_assign_op(builder, expr, offsets)
+        case Or_Equal_Node: emit_assign_op(builder, expr, offsets)
+        case And_Equal_Node: emit_assign_op(builder, expr, offsets)
+        case Shift_Left_Equal_Node: emit_assign_op(builder, expr, offsets)
+        case Shift_Right_Equal_Node: emit_assign_op(builder, expr, offsets)
+
+        case:
+            fmt.println(expr)
+            panic("Not a valid expression!")
     }
 }
 
-emit_statement :: proc(builder: ^strings.Builder, statement: Statement_Node, offsets: ^map[string]int, function_name: string) {
-    switch stmt in statement {
-        case ^Return_Node:
+emit_statement :: proc(builder: ^strings.Builder, statement: ^Ast_Node, offsets: ^map[string]int, function_name: string) {
+    #partial switch stmt in statement.variant {
+        case Return_Node:
             emit_expr(builder, stmt.expr, offsets)
             fmt.sbprintfln(builder, "  jmp %v_done", function_name)
 
-        case ^Decl_Assign_Node:
+        case Decl_Assign_Node:
             emit_expr(builder, stmt.right, offsets)
             fmt.sbprintfln(builder, "  mov %%eax, -%v(%%rbp)", offsets[stmt.var_name])
 
-        case ^Decl_Node: // Space on the stack is already allocated by emit_function
+        case Decl_Node: // Space on the stack is already allocated by emit_function
 
-        case Expr_Node:
-            emit_expr(builder, stmt, offsets)
+        case:
+            emit_expr(builder, statement, offsets)
     }
 }
 
-emit_function :: proc(builder: ^strings.Builder, function: ^Function_Node, vars: ^[dynamic]string) {
+emit_function :: proc(builder: ^strings.Builder, function: Function_Node, vars: ^[dynamic]string) {
     fmt.sbprintfln(builder, ".globl %v", function.name)
     fmt.sbprintfln(builder, "%v:", function.name)
     fmt.sbprintln(builder, "  push %rbp")
@@ -1173,7 +1347,8 @@ emit_function :: proc(builder: ^strings.Builder, function: ^Function_Node, vars:
 emit :: proc(program: Program, var_map: ^map[string][dynamic]string) -> string {
     builder: strings.Builder
 
-    for function in program.children {
+    for node in program.children {
+        function := node.variant.(Function_Node)
         emit_function(&builder, function, &var_map[function.name])
     }
 
