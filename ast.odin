@@ -54,6 +54,7 @@ Ast_Node :: struct {
         Decl_Assign_Node,
         Decl_Node,
         Ternary_Node,
+        If_Node,
     },
 }
 
@@ -137,6 +138,11 @@ Ternary_Node :: struct {
     condition: ^Ast_Node,
     if_true: ^Ast_Node,
     if_false: ^Ast_Node,
+}
+
+If_Node :: struct {
+    condition: ^Ast_Node,
+    if_true: ^Ast_Node,
 }
 
 make_node_1 :: proc($T: typeid, inner: $I) -> ^Ast_Node {

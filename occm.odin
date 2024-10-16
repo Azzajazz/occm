@@ -96,6 +96,8 @@ get_keyword_or_ident_token :: proc(input: string) -> (token: Token, rest: string
     text := input[:byte_index]
     if text == "return" do return Token{.ReturnKeyword, text, {}}, input[byte_index:]
     else if text == "int" do return Token{.IntKeyword, text, {}}, input[byte_index:]
+    else if text == "if" do return Token{.IfKeyword, text, {}}, input[byte_index:]
+    else if text == "else" do return Token{.ElseKeyword, text, {}}, input[byte_index:]
     else do return Token{.Ident, text, {}}, input[byte_index:]
 }
 
@@ -731,6 +733,18 @@ parse_statement :: proc(tokens: []Token) -> (^Ast_Node, []Token) {
             if token.type != .Semicolon do parse_error(token, tokens)
             return statement, tokens
 
+        case .IfKeyword:
+            tokens := tokens[1:]
+            token, tokens = take_first_token(tokens)
+            if token.type != .LParen do parse_error(token, tokens)
+            condition: ^Ast_Node = ---
+            condition, tokens = parse_expression(tokens)
+            token, tokens = take_first_token(tokens)
+            if token.type != .RParen do parse_error(token, tokens)
+            if_true: ^Ast_Node = ---
+            if_true, tokens = parse_statement(tokens)
+            return make_node_2(If_Node, condition, if_true), tokens
+
         case:
             statement, tokens := parse_expression(tokens)
             token, tokens = take_first_token(tokens)
@@ -1349,6 +1363,15 @@ emit_statement :: proc(builder: ^strings.Builder, statement: ^Ast_Node, offsets:
             fmt.sbprintfln(builder, "  mov %%eax, -%v(%%rbp)", offsets[stmt.var_name])
 
         case Decl_Node: // Space on the stack is already allocated by emit_function
+
+        case If_Node:
+            label := current_label
+            current_label += 1
+            emit_expr(builder, stmt.condition, offsets)
+            fmt.sbprintln(builder, "  cmp $0, %eax")
+            fmt.sbprintfln(builder, "  je L%v", label)
+            emit_statement(builder, stmt.if_true, offsets, function_name)
+            emit_label(builder, label)
 
         case:
             emit_expr(builder, statement, offsets)
