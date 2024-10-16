@@ -650,10 +650,6 @@ parse_expression :: proc(tokens: []Token, min_prec := 0) -> (^Ast_Node, []Token)
     for (token.type in assign_ops || token.type in bin_ops || token.type == .QuestionMark) \
         && op_precs[token.type] >= min_prec {
         if (token.type in assign_ops) {
-            _, is_ident := leaf.variant.(Ident_Node)
-            // @REVISIT: This would be better separated into the semantic pass, but this requires an Assign_Op_Node
-            // with a left that can be something other than an Ident_Node
-            if !is_ident do semantic_error()
 
             prec := op_precs[token.type]
             right: ^Ast_Node = ---
@@ -921,39 +917,40 @@ validate_expr :: proc(expr: ^Ast_Node, vars: ^[dynamic]string) {
         case Shift_Right_Node:
             validate_expr(e.left, vars)
             validate_expr(e.right, vars)
+
         case Equal_Node:
-            validate_expr(e.left, vars)
-            validate_expr(e.right, vars)
+            _, is_ident := e.left.variant.(Ident_Node)
+            if !is_ident do semantic_error()
         case Plus_Equal_Node:
-            validate_expr(e.left, vars)
-            validate_expr(e.right, vars)
+            _, is_ident := e.left.variant.(Ident_Node)
+            if !is_ident do semantic_error()
         case Minus_Equal_Node:
-            validate_expr(e.left, vars)
-            validate_expr(e.right, vars)
+            _, is_ident := e.left.variant.(Ident_Node)
+            if !is_ident do semantic_error()
         case Times_Equal_Node:
-            validate_expr(e.left, vars)
-            validate_expr(e.right, vars)
+            _, is_ident := e.left.variant.(Ident_Node)
+            if !is_ident do semantic_error()
         case Divide_Equal_Node:
-            validate_expr(e.left, vars)
-            validate_expr(e.right, vars)
+            _, is_ident := e.left.variant.(Ident_Node)
+            if !is_ident do semantic_error()
         case Modulo_Equal_Node:
-            validate_expr(e.left, vars)
-            validate_expr(e.right, vars)
+            _, is_ident := e.left.variant.(Ident_Node)
+            if !is_ident do semantic_error()
         case Xor_Equal_Node:
-            validate_expr(e.left, vars)
-            validate_expr(e.right, vars)
+            _, is_ident := e.left.variant.(Ident_Node)
+            if !is_ident do semantic_error()
         case Or_Equal_Node:
-            validate_expr(e.left, vars)
-            validate_expr(e.right, vars)
+            _, is_ident := e.left.variant.(Ident_Node)
+            if !is_ident do semantic_error()
         case And_Equal_Node:
-            validate_expr(e.left, vars)
-            validate_expr(e.right, vars)
+            _, is_ident := e.left.variant.(Ident_Node)
+            if !is_ident do semantic_error()
         case Shift_Left_Equal_Node:
-            validate_expr(e.left, vars)
-            validate_expr(e.right, vars)
+            _, is_ident := e.left.variant.(Ident_Node)
+            if !is_ident do semantic_error()
         case Shift_Right_Equal_Node:
-            validate_expr(e.left, vars)
-            validate_expr(e.right, vars)
+            _, is_ident := e.left.variant.(Ident_Node)
+            if !is_ident do semantic_error()
     }
 }
 
