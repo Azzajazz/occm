@@ -741,9 +741,19 @@ parse_statement :: proc(tokens: []Token) -> (^Ast_Node, []Token) {
             condition, tokens = parse_expression(tokens)
             token, tokens = take_first_token(tokens)
             if token.type != .RParen do parse_error(token, tokens)
+
             if_true: ^Ast_Node = ---
             if_true, tokens = parse_statement(tokens)
-            return make_node_2(If_Node, condition, if_true), tokens
+
+            token = peek_first_token(tokens)
+            if token.type == .ElseKeyword {
+                if_false: ^Ast_Node = ---
+                if_false, tokens = parse_statement(tokens[1:])
+                return make_node_3(If_Else_Node, condition, if_true, if_false), tokens
+            }
+            else {
+                return make_node_2(If_Node, condition, if_true), tokens
+            }
 
         case .Semicolon:
             return make_node_0(Null_Statement_Node), tokens[1:]
@@ -1357,6 +1367,8 @@ emit_expr :: proc(builder: ^strings.Builder, expr: ^Ast_Node, offsets: ^map[stri
 
 emit_statement :: proc(builder: ^strings.Builder, statement: ^Ast_Node, offsets: ^map[string]int, function_name: string) {
     #partial switch stmt in statement.variant {
+        case Null_Statement_Node: // Do nothing
+
         case Return_Node:
             emit_expr(builder, stmt.expr, offsets)
             fmt.sbprintfln(builder, "  jmp %v_done", function_name)
@@ -1375,6 +1387,18 @@ emit_statement :: proc(builder: ^strings.Builder, statement: ^Ast_Node, offsets:
             fmt.sbprintfln(builder, "  je L%v", label)
             emit_statement(builder, stmt.if_true, offsets, function_name)
             emit_label(builder, label)
+
+        case If_Else_Node:
+            label := current_label
+            current_label += 2
+            emit_expr(builder, stmt.condition, offsets)
+            fmt.sbprintln(builder, "  cmp $0, %eax")
+            fmt.sbprintfln(builder, "  je L%v", label)
+            emit_statement(builder, stmt.if_true, offsets, function_name)
+            fmt.sbprintfln(builder, "  jmp L%v", label + 1)
+            emit_label(builder, label)
+            emit_statement(builder, stmt.if_false, offsets, function_name)
+            emit_label(builder, label + 1)
 
         case:
             emit_expr(builder, statement, offsets)

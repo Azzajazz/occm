@@ -56,6 +56,7 @@ Ast_Node :: struct {
         Decl_Node,
         Ternary_Node,
         If_Node,
+        If_Else_Node,
     },
 }
 
@@ -147,6 +148,8 @@ If_Node :: struct {
     condition: ^Ast_Node,
     if_true: ^Ast_Node,
 }
+
+If_Else_Node :: distinct Ternary_Node
 
 make_node_0 :: proc($T: typeid) -> ^Ast_Node {
     node := new(Ast_Node)
