@@ -57,6 +57,7 @@ Ast_Node :: struct {
         Goto_Node,
         Decl_Assign_Node,
         Decl_Node,
+        Compound_Statement_Node,
         Ternary_Node,
         If_Node,
         If_Else_Node,
@@ -143,6 +144,10 @@ Decl_Assign_Node :: struct {
 
 Decl_Node :: struct {
     var_name: string 
+}
+
+Compound_Statement_Node :: struct {
+    statements: [dynamic]^Ast_Node,
 }
 
 Ternary_Node :: struct {

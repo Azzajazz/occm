@@ -793,8 +793,10 @@ parse_statement :: proc(tokens: []Token, labels: [dynamic]string = nil) -> (^Ast
             tokens = tokens[1:]
             result = make_node_0(Null_Statement_Node)
 
-        //case .LBrace:
-        //    return parse_block_statement_list(tokens)
+        case .LBrace:
+            statements: [dynamic]^Ast_Node = ---
+            statements, tokens = parse_block_statement_list(tokens[1:])
+            result = make_node_1(Compound_Statement_Node, statements)
 
         case:
             result, tokens = parse_expression(tokens)
@@ -883,12 +885,13 @@ semantic_error :: proc(location := #caller_location) {
     os.exit(4)
 }
 
-gather_labels :: proc(program: Program) -> [dynamic]string {
-    labels := make([dynamic]string)
+gather_labels :: proc(program: Program) -> map[string][dynamic]string {
+    labels := make(map[string][dynamic]string)
 
     for node in program.children {
         function := node.variant.(Function_Node)
-        gather_function_labels(function, &labels)
+        labels[function.name] = make([dynamic]string)
+        gather_function_labels(function, &labels[function.name])
     }
 
     return labels
@@ -921,25 +924,25 @@ gather_function_labels :: proc(function: Function_Node, labels: ^[dynamic]string
     }
 }
 
-validate_and_gather_variables :: proc(program: Program, labels: [dynamic]string) -> map[string][dynamic]string {
+validate_and_gather_variables :: proc(program: Program, labels: map[string][dynamic]string) -> map[string][dynamic]string {
     vars := make(map[string][dynamic]string)
 
     for node in program.children {
         function := node.variant.(Function_Node)
         vars[function.name] = make([dynamic]string)
-        validate_function(function, &vars[function.name], labels)
+        validate_function(function, &vars[function.name], &labels[function.name])
     }
 
     return vars
 }
 
-validate_function :: proc(function: Function_Node, vars: ^[dynamic]string, labels: [dynamic]string) {
+validate_function :: proc(function: Function_Node, vars: ^[dynamic]string, labels: ^[dynamic]string) {
     for block_statement in function.body {
         validate_block_statement(block_statement, vars, labels)
     }
 }
 
-validate_block_statement :: proc(block_statement: ^Ast_Node, vars: ^[dynamic]string, labels: [dynamic]string) {
+validate_block_statement :: proc(block_statement: ^Ast_Node, vars: ^[dynamic]string, labels: ^[dynamic]string) {
     #partial switch stmt in block_statement.variant {
         case Decl_Node:
             if contains(stmt.var_name, vars[:]) do semantic_error()
@@ -954,7 +957,7 @@ validate_block_statement :: proc(block_statement: ^Ast_Node, vars: ^[dynamic]str
     }
 }
 
-validate_statement :: proc(statement: ^Ast_Node, vars: ^[dynamic]string, labels: [dynamic]string) {
+validate_statement :: proc(statement: ^Ast_Node, vars: ^[dynamic]string, labels: ^[dynamic]string) {
     #partial switch stmt in statement.variant {
         case Return_Node:
             validate_expr(stmt.expr, vars)
