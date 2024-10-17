@@ -784,7 +784,10 @@ parse_statement :: proc(tokens: []Token, labels: [dynamic]string = nil) -> (^Ast
             tokens = tokens[1:]
             token, tokens = take_first_token(tokens)
             if token.type != .Ident do parse_error(token, tokens)
-            result = make_node_1(Goto_Node, token.text)
+            label := token.text
+            token, tokens = take_first_token(tokens)
+            if token.type != .Semicolon do parse_error(token, tokens)
+            result = make_node_1(Goto_Node, label)
 
         case .Semicolon:
             tokens = tokens[1:]
@@ -883,7 +886,6 @@ gather_labels :: proc(program: Program) -> [dynamic]string {
 
 gather_function_labels :: proc(function: Function_Node, labels: ^[dynamic]string) {
     for block_statement in function.body {
-        fmt.println(block_statement)
         for label in block_statement.labels {
             if contains(label, labels[:]) do semantic_error()
             append(labels, label)
