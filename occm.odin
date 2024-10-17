@@ -691,26 +691,25 @@ parse_expression :: proc(tokens: []Token, min_prec := 0) -> (^Ast_Node, []Token)
     return leaf, tokens
 }
 
-parse_label :: proc(tokens: []Token) -> (string, []Token) {
+parse_labels :: proc(tokens: []Token) -> ([dynamic]string, []Token) {
     tokens := tokens
-    label := ""
-    token := peek_first_token(tokens)
+    labels := make([dynamic]string)
 
-    if token.type == .Ident && tokens[1].type == .Colon {
-        label = token.text
+    for token := peek_first_token(tokens); token.type == .Ident && tokens[1].type == .Colon; token = peek_first_token(tokens) {
+        append(&labels, token.text)
         tokens = tokens[2:]
     }
 
-    return label, tokens
+    return labels, tokens
 }
 
 parse_block_statement :: proc(tokens: []Token) -> (^Ast_Node, []Token) {
-    label, tokens := parse_label(tokens)
+    labels, tokens := parse_labels(tokens)
     token := peek_first_token(tokens)
 
     #partial switch token.type {
         case .IntKeyword:
-            if label != "" do parse_error(token, tokens)
+            if len(labels) > 0 do parse_error(token, tokens)
             token, tokens = take_first_token(tokens)
             token, tokens = take_first_token(tokens)
             if token.type != .Ident do parse_error(token, tokens)
@@ -734,17 +733,17 @@ parse_block_statement :: proc(tokens: []Token) -> (^Ast_Node, []Token) {
             }
 
         case:
-            return parse_statement(tokens, label, false)
+            return parse_statement(tokens, labels)
     }
     
     panic("Unreachable")
 }
 
-parse_statement :: proc(tokens: []Token, label := "", should_parse_label := true) -> (^Ast_Node, []Token) {
+parse_statement :: proc(tokens: []Token, labels: [dynamic]string = nil) -> (^Ast_Node, []Token) {
     tokens := tokens
-    label := label
-    if should_parse_label {
-        label, tokens = parse_label(tokens)
+    labels := labels
+    if labels == nil {
+        labels, tokens = parse_labels(tokens)
     }
     token := peek_first_token(tokens)
 
@@ -797,7 +796,7 @@ parse_statement :: proc(tokens: []Token, label := "", should_parse_label := true
             if token.type != .Semicolon do parse_error(token, tokens)
     }
 
-    result.label = label
+    result.labels = labels
     return result, tokens
 }
 
@@ -885,27 +884,27 @@ gather_labels :: proc(program: Program) -> [dynamic]string {
 gather_function_labels :: proc(function: Function_Node, labels: ^[dynamic]string) {
     for block_statement in function.body {
         fmt.println(block_statement)
-        if block_statement.label != "" {
-            if contains(block_statement.label, labels[:]) do semantic_error()
-            append(labels, block_statement.label)
+        for label in block_statement.labels {
+            if contains(label, labels[:]) do semantic_error()
+            append(labels, label)
         }
 
         #partial switch stmt in block_statement.variant {
             case If_Node:
-                if stmt.if_true.label != "" {
-                    if contains(stmt.if_true.label, labels[:]) do semantic_error()
-                    append(labels, stmt.if_true.label)
-                }
+            for label in stmt.if_true.labels {
+                if contains(label, labels[:]) do semantic_error()
+                append(labels, label)
+            }
 
             case If_Else_Node:
-                if stmt.if_true.label != "" {
-                    if contains(stmt.if_true.label, labels[:]) do semantic_error()
-                    append(labels, stmt.if_true.label)
-                }
-                if stmt.if_false.label != "" {
-                    if contains(stmt.if_false.label, labels[:]) do semantic_error()
-                    append(labels, stmt.if_false.label)
-                }
+            for label in stmt.if_true.labels {
+                if contains(label, labels[:]) do semantic_error()
+                append(labels, label)
+            }
+            for label in stmt.if_false.labels {
+                if contains(label, labels[:]) do semantic_error()
+                append(labels, label)
+            }
         }
     }
 }
@@ -1503,8 +1502,8 @@ emit_block_statement :: proc(builder: ^strings.Builder, block_statement: ^Ast_No
 }
 
 emit_statement :: proc(builder: ^strings.Builder, statement: ^Ast_Node, offsets: ^map[string]int, function_name: string) {
-    if statement.label != "" {
-        fmt.sbprintfln(builder, "_%v:", statement.label)
+    for label in statement.labels {
+        fmt.sbprintfln(builder, "_%v:", label)
     }
 
     #partial switch stmt in statement.variant {

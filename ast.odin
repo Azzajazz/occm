@@ -9,7 +9,7 @@ Program :: struct {
 }
 
 Ast_Node :: struct {
-    label: string,
+    labels: [dynamic]string,
 
     // Common stuff would go here
     variant: union {
