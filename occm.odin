@@ -87,7 +87,7 @@ get_int_constant_token :: proc(input: string) -> (token: Token, rest: string) {
 }
 
 get_keyword_or_ident_token :: proc(input: string) -> (token: Token, rest: string) {
-    assert(is_ascii_alpha_byte(input[0]))
+    assert(is_ident_start_byte(input[0]))
     byte_index := 1
 
     for byte_index < len(input) && is_ident_tail_byte(input[byte_index]) {
@@ -109,6 +109,10 @@ is_ascii_digit_byte :: proc(c: u8) -> bool {
 
 is_ascii_alpha_byte :: proc(c: u8) -> bool {
     return ('a' <= c && c <= 'z') || ('A' <= c && c <= 'Z')
+}
+
+is_ident_start_byte :: proc(c: u8) -> bool {
+    return is_ascii_alpha_byte(c) || c == '_'
 }
 
 is_ident_tail_byte :: proc(c: u8) -> bool {
@@ -380,7 +384,7 @@ lex :: proc(code: string) -> [dynamic]Token {
             token, code = get_int_constant_token(code)
             append(&tokens, token)
         }
-        else if is_ascii_alpha_byte(code[0]) {
+        else if is_ident_start_byte(code[0]) {
             token, code = get_keyword_or_ident_token(code)
             append(&tokens, token)
         }
