@@ -54,6 +54,7 @@ Token_Type :: enum {
     ReturnKeyword,
     IfKeyword,
     ElseKeyword,
+    GotoKeyword,
     Ident,
     IntConstant,
     Semicolon,
@@ -98,6 +99,7 @@ get_keyword_or_ident_token :: proc(input: string) -> (token: Token, rest: string
     else if text == "int" do return Token{.IntKeyword, text, {}}, input[byte_index:]
     else if text == "if" do return Token{.IfKeyword, text, {}}, input[byte_index:]
     else if text == "else" do return Token{.ElseKeyword, text, {}}, input[byte_index:]
+    else if text == "goto" do return Token{.GotoKeyword, text, {}}, input[byte_index:]
     else do return Token{.Ident, text, {}}, input[byte_index:]
 }
 
@@ -689,8 +691,16 @@ parse_block_statement :: proc(tokens: []Token) -> (^Ast_Node, []Token) {
     tokens := tokens
     token := peek_first_token(tokens)
 
+    label := ""
+    if token.type == .Ident && tokens[1].type == .Colon {
+        label = token.text
+        tokens = tokens[2:]
+        token = peek_first_token(tokens)
+    }
+
     #partial switch token.type {
         case .IntKeyword:
+            if label != "" do parse_error(token, tokens)
             token, tokens = take_first_token(tokens)
             token, tokens = take_first_token(tokens)
             if token.type != .Ident do parse_error(token, tokens)
@@ -714,25 +724,26 @@ parse_block_statement :: proc(tokens: []Token) -> (^Ast_Node, []Token) {
             }
 
         case:
-            return parse_statement(tokens)
+            return parse_statement(tokens, label)
     }
     
     panic("Unreachable")
 }
 
-parse_statement :: proc(tokens: []Token) -> (^Ast_Node, []Token) {
+parse_statement :: proc(tokens: []Token, label := "") -> (^Ast_Node, []Token) {
     tokens := tokens
     token := peek_first_token(tokens)
+
+    result: ^Ast_Node = ---
 
     #partial switch token.type {
         case .ReturnKeyword:
             tokens = tokens[1:]
             expr: ^Ast_Node = ---
             expr, tokens = parse_expression(tokens)
-            statement := make_node_1(Return_Node, expr)
+            result = make_node_1(Return_Node, expr)
             token, tokens = take_first_token(tokens)
             if token.type != .Semicolon do parse_error(token, tokens)
-            return statement, tokens
 
         case .IfKeyword:
             tokens = tokens[1:]
@@ -750,23 +761,30 @@ parse_statement :: proc(tokens: []Token) -> (^Ast_Node, []Token) {
             if token.type == .ElseKeyword {
                 if_false: ^Ast_Node = ---
                 if_false, tokens = parse_statement(tokens[1:])
-                return make_node_3(If_Else_Node, condition, if_true, if_false), tokens
+                result = make_node_3(If_Else_Node, condition, if_true, if_false)
             }
             else {
-                return make_node_2(If_Node, condition, if_true), tokens
+                result = make_node_2(If_Node, condition, if_true)
             }
 
+        case .GotoKeyword:
+            tokens = tokens[1:]
+            token, tokens = take_first_token(tokens)
+            if token.type != .Ident do parse_error(token, tokens)
+            result = make_node_1(Goto_Node, token.text)
+
         case .Semicolon:
-            return make_node_0(Null_Statement_Node), tokens[1:]
+            tokens = tokens[1:]
+            result = make_node_0(Null_Statement_Node)
 
         case:
-            statement, tokens := parse_expression(tokens)
+            result, tokens = parse_expression(tokens)
             token, tokens = take_first_token(tokens)
             if token.type != .Semicolon do parse_error(token, tokens)
-            return statement, tokens
     }
 
-    panic("Unreachable")
+    result.label = label
+    return result, tokens
 }
 
 parse_function :: proc(tokens: []Token) -> (^Ast_Node, []Token) {
@@ -1391,19 +1409,31 @@ emit_expr :: proc(builder: ^strings.Builder, expr: ^Ast_Node, offsets: ^map[stri
     }
 }
 
+emit_block_statement :: proc(builder: ^strings.Builder, block_statement: ^Ast_Node, offsets: ^map[string]int, function_name: string) {
+    #partial switch stmt in block_statement.variant {
+        case Decl_Assign_Node:
+            emit_expr(builder, stmt.right, offsets)
+            fmt.sbprintfln(builder, "  mov %%eax, -%v(%%rbp)", offsets[stmt.var_name])
+
+        case Decl_Node: // Space on the stack is already allocated by emit_function
+
+        case:
+            emit_statement(builder, block_statement, offsets, function_name)
+    }
+
+}
+
 emit_statement :: proc(builder: ^strings.Builder, statement: ^Ast_Node, offsets: ^map[string]int, function_name: string) {
+    if statement.label != "" {
+        fmt.sbprintfln(builder, "%v_%v:", function_name, statement.label)
+    }
+
     #partial switch stmt in statement.variant {
         case Null_Statement_Node: // Do nothing
 
         case Return_Node:
             emit_expr(builder, stmt.expr, offsets)
             fmt.sbprintfln(builder, "  jmp %v_done", function_name)
-
-        case Decl_Assign_Node:
-            emit_expr(builder, stmt.right, offsets)
-            fmt.sbprintfln(builder, "  mov %%eax, -%v(%%rbp)", offsets[stmt.var_name])
-
-        case Decl_Node: // Space on the stack is already allocated by emit_function
 
         case If_Node:
             label := current_label
@@ -1425,6 +1455,12 @@ emit_statement :: proc(builder: ^strings.Builder, statement: ^Ast_Node, offsets:
             emit_label(builder, label)
             emit_statement(builder, stmt.if_false, offsets, function_name)
             emit_label(builder, label + 1)
+
+        case Goto_Node:
+            fmt.sbprintfln(builder, "  jmp %v_%v", function_name, stmt.label)
+
+        case Label_Node:
+            fmt.sbprintfln(builder, "%v_%v:", function_name, stmt.label)
 
         case:
             emit_expr(builder, statement, offsets)
@@ -1451,7 +1487,7 @@ emit_function :: proc(builder: ^strings.Builder, function: Function_Node, vars: 
     }
 
     for statement in function.body {
-        emit_statement(builder, statement, &offsets, function.name)
+        emit_block_statement(builder, statement, &offsets, function.name)
     }
 
     if function.name == "main" {

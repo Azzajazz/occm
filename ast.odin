@@ -9,6 +9,8 @@ Program :: struct {
 }
 
 Ast_Node :: struct {
+    label: string,
+
     // Common stuff would go here
     variant: union {
         Function_Node,
@@ -52,6 +54,7 @@ Ast_Node :: struct {
         Shift_Right_Equal_Node,
         Null_Statement_Node,
         Return_Node,
+        Goto_Node,
         Decl_Assign_Node,
         Decl_Node,
         Ternary_Node,
@@ -127,6 +130,10 @@ Null_Statement_Node :: struct {}
 
 Return_Node :: struct {
     expr: ^Ast_Node,
+}
+
+Goto_Node :: struct {
+    label: string
 }
 
 Decl_Assign_Node :: struct {
