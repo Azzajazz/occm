@@ -1005,6 +1005,11 @@ validate_statement :: proc(statement: ^Ast_Node, vars: ^Scoped_Variables, labels
         case Goto_Node:
             if !contains(stmt.label, labels[:]) do semantic_error()
 
+        case Compound_Statement_Node:
+            for block_statement in stmt.statements {
+                validate_block_statement(block_statement, vars, labels)
+            }
+
         case:
             validate_expr(statement, vars)
     }
@@ -1603,6 +1608,11 @@ emit_statement :: proc(builder: ^strings.Builder, statement: ^Ast_Node, vars: ^S
 
         case Goto_Node:
             fmt.sbprintfln(builder, "  jmp _%v", stmt.label)
+
+        case Compound_Statement_Node:
+            for block_statement in stmt.statements {
+                emit_block_statement(builder, block_statement, vars, function_name)
+            }
 
         case:
             emit_expr(builder, statement, vars)
