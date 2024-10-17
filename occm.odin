@@ -985,38 +985,60 @@ validate_expr :: proc(expr: ^Ast_Node, vars: ^[dynamic]string) {
             validate_expr(e.right, vars)
 
         case Equal_Node:
-            _, is_ident := e.left.variant.(Ident_Node)
+            ident, is_ident := e.left.variant.(Ident_Node)
             if !is_ident do semantic_error()
+            if !contains_variable(ident.var_name, vars) do semantic_error()
+            validate_expr(e.right, vars)
         case Plus_Equal_Node:
-            _, is_ident := e.left.variant.(Ident_Node)
+            ident, is_ident := e.left.variant.(Ident_Node)
             if !is_ident do semantic_error()
+            if !contains_variable(ident.var_name, vars) do semantic_error()
+            validate_expr(e.right, vars)
         case Minus_Equal_Node:
-            _, is_ident := e.left.variant.(Ident_Node)
+            ident, is_ident := e.left.variant.(Ident_Node)
             if !is_ident do semantic_error()
+            if !contains_variable(ident.var_name, vars) do semantic_error()
+            validate_expr(e.right, vars)
         case Times_Equal_Node:
-            _, is_ident := e.left.variant.(Ident_Node)
+            ident, is_ident := e.left.variant.(Ident_Node)
             if !is_ident do semantic_error()
+            if !contains_variable(ident.var_name, vars) do semantic_error()
+            validate_expr(e.right, vars)
         case Divide_Equal_Node:
-            _, is_ident := e.left.variant.(Ident_Node)
+            ident, is_ident := e.left.variant.(Ident_Node)
             if !is_ident do semantic_error()
+            if !contains_variable(ident.var_name, vars) do semantic_error()
+            validate_expr(e.right, vars)
         case Modulo_Equal_Node:
-            _, is_ident := e.left.variant.(Ident_Node)
+            ident, is_ident := e.left.variant.(Ident_Node)
             if !is_ident do semantic_error()
+            if !contains_variable(ident.var_name, vars) do semantic_error()
+            validate_expr(e.right, vars)
         case Xor_Equal_Node:
-            _, is_ident := e.left.variant.(Ident_Node)
+            ident, is_ident := e.left.variant.(Ident_Node)
             if !is_ident do semantic_error()
+            if !contains_variable(ident.var_name, vars) do semantic_error()
+            validate_expr(e.right, vars)
         case Or_Equal_Node:
-            _, is_ident := e.left.variant.(Ident_Node)
+            ident, is_ident := e.left.variant.(Ident_Node)
             if !is_ident do semantic_error()
+            if !contains_variable(ident.var_name, vars) do semantic_error()
+            validate_expr(e.right, vars)
         case And_Equal_Node:
-            _, is_ident := e.left.variant.(Ident_Node)
+            ident, is_ident := e.left.variant.(Ident_Node)
             if !is_ident do semantic_error()
+            if !contains_variable(ident.var_name, vars) do semantic_error()
+            validate_expr(e.right, vars)
         case Shift_Left_Equal_Node:
-            _, is_ident := e.left.variant.(Ident_Node)
+            ident, is_ident := e.left.variant.(Ident_Node)
             if !is_ident do semantic_error()
+            if !contains_variable(ident.var_name, vars) do semantic_error()
+            validate_expr(e.right, vars)
         case Shift_Right_Equal_Node:
-            _, is_ident := e.left.variant.(Ident_Node)
+            ident, is_ident := e.left.variant.(Ident_Node)
             if !is_ident do semantic_error()
+            if !contains_variable(ident.var_name, vars) do semantic_error()
+            validate_expr(e.right, vars)
 
         case Ternary_Node:
             validate_expr(e.condition, vars)
@@ -1458,9 +1480,6 @@ emit_statement :: proc(builder: ^strings.Builder, statement: ^Ast_Node, offsets:
 
         case Goto_Node:
             fmt.sbprintfln(builder, "  jmp %v_%v", function_name, stmt.label)
-
-        case Label_Node:
-            fmt.sbprintfln(builder, "%v_%v:", function_name, stmt.label)
 
         case:
             emit_expr(builder, statement, offsets)
