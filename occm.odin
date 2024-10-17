@@ -1471,7 +1471,7 @@ emit_block_statement :: proc(builder: ^strings.Builder, block_statement: ^Ast_No
 
 emit_statement :: proc(builder: ^strings.Builder, statement: ^Ast_Node, offsets: ^map[string]int, function_name: string) {
     if statement.label != "" {
-        fmt.sbprintfln(builder, "%v:", statement.label)
+        fmt.sbprintfln(builder, "_%v:", statement.label)
     }
 
     #partial switch stmt in statement.variant {
@@ -1503,7 +1503,7 @@ emit_statement :: proc(builder: ^strings.Builder, statement: ^Ast_Node, offsets:
             emit_label(builder, label + 1)
 
         case Goto_Node:
-            fmt.sbprintfln(builder, "  jmp %v_%v", function_name, stmt.label)
+            fmt.sbprintfln(builder, "  jmp _%v", stmt.label)
 
         case:
             emit_expr(builder, statement, offsets)
