@@ -687,16 +687,22 @@ parse_expression :: proc(tokens: []Token, min_prec := 0) -> (^Ast_Node, []Token)
     return leaf, tokens
 }
 
-parse_block_statement :: proc(tokens: []Token) -> (^Ast_Node, []Token) {
+parse_label :: proc(tokens: []Token) -> (string, []Token) {
     tokens := tokens
+    label := ""
     token := peek_first_token(tokens)
 
-    label := ""
     if token.type == .Ident && tokens[1].type == .Colon {
         label = token.text
         tokens = tokens[2:]
-        token = peek_first_token(tokens)
     }
+
+    return label, tokens
+}
+
+parse_block_statement :: proc(tokens: []Token) -> (^Ast_Node, []Token) {
+    label, tokens := parse_label(tokens)
+    token := peek_first_token(tokens)
 
     #partial switch token.type {
         case .IntKeyword:
@@ -724,14 +730,14 @@ parse_block_statement :: proc(tokens: []Token) -> (^Ast_Node, []Token) {
             }
 
         case:
-            return parse_statement(tokens, label)
+            return parse_statement(tokens)
     }
     
     panic("Unreachable")
 }
 
-parse_statement :: proc(tokens: []Token, label := "") -> (^Ast_Node, []Token) {
-    tokens := tokens
+parse_statement :: proc(tokens: []Token) -> (^Ast_Node, []Token) {
+    label, tokens := parse_label(tokens)
     token := peek_first_token(tokens)
 
     result: ^Ast_Node = ---
@@ -873,6 +879,24 @@ gather_function_labels :: proc(function: Function_Node, labels: ^[dynamic]string
         if block_statement.label != "" {
             if contains(block_statement.label, labels[:]) do semantic_error()
             append(labels, block_statement.label)
+        }
+
+        #partial switch stmt in block_statement.variant {
+            case If_Node:
+                if stmt.if_true.label != "" {
+                    if contains(stmt.if_true.label, labels[:]) do semantic_error()
+                    append(labels, stmt.if_true.label)
+                }
+
+            case If_Else_Node:
+                if stmt.if_true.label != "" {
+                    if contains(stmt.if_true.label, labels[:]) do semantic_error()
+                    append(labels, stmt.if_true.label)
+                }
+                if stmt.if_false.label != "" {
+                    if contains(stmt.if_false.label, labels[:]) do semantic_error()
+                    append(labels, stmt.if_false.label)
+                }
         }
     }
 }
