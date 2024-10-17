@@ -940,18 +940,24 @@ make_scoped_variables :: proc(parent: ^Scoped_Variables, node: ^Ast_Node) -> ^Sc
 
 print_scoped_variables :: proc(vars: ^Scoped_Variables, indent := 0) {
     print_indent(indent)
-    fmt.println("vars=(")
-    for var, offset in vars.var_offsets {
-        print_indent(indent + 1)
-        fmt.printfln("%v: %v", var, offset)
+    fmt.print("vars=(")
+    if len(vars.var_offsets) != 0 {
+        fmt.println()
+        for var in vars.var_offsets {
+            print_indent(indent + 1)
+            fmt.println(var)
+        }
+        print_indent(indent)
     }
 
-    print_indent(indent)
-    fmt.println("), children = (")
-    for _, child in vars.children {
-        print_scoped_variables(child, indent + 1)
+    fmt.print("), children = (")
+    if len(vars.children) != 0 {
+        fmt.println()
+        for _, child in vars.children {
+            print_scoped_variables(child, indent + 1)
+        }
+        print_indent(indent)
     }
-    print_indent(indent)
     fmt.println(")")
 }
 
@@ -1006,8 +1012,9 @@ validate_statement :: proc(statement: ^Ast_Node, vars: ^Scoped_Variables, labels
             if !contains(stmt.label, labels[:]) do semantic_error()
 
         case Compound_Statement_Node:
+            inner_vars := make_scoped_variables(vars, statement)
             for block_statement in stmt.statements {
-                validate_block_statement(block_statement, vars, labels)
+                validate_block_statement(block_statement, inner_vars, labels)
             }
 
         case:
