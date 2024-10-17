@@ -1618,7 +1618,7 @@ emit_statement :: proc(builder: ^strings.Builder, statement: ^Ast_Node, vars: ^S
 
         case Compound_Statement_Node:
             for block_statement in stmt.statements {
-                emit_block_statement(builder, block_statement, vars, function_name)
+                emit_block_statement(builder, block_statement, vars.children[statement], function_name)
             }
 
         case:
@@ -1647,7 +1647,7 @@ emit_function :: proc(builder: ^strings.Builder, function: Function_Node, vars: 
     fmt.sbprintln(builder, "  push %rbp")
     fmt.sbprintln(builder, "  mov %rsp, %rbp")
 
-    rsp_decrement := calculate_offsets(vars)
+    rsp_decrement := calculate_offsets(vars) - 4
     if rsp_decrement > 0 {
         fmt.sbprintfln(builder, "  sub $%v, %%rsp", rsp_decrement)
     }
