@@ -793,6 +793,9 @@ parse_statement :: proc(tokens: []Token, labels: [dynamic]string = nil) -> (^Ast
             tokens = tokens[1:]
             result = make_node_0(Null_Statement_Node)
 
+        //case .LBrace:
+        //    return parse_block_statement_list(tokens)
+
         case:
             result, tokens = parse_expression(tokens)
             token, tokens = take_first_token(tokens)
@@ -801,6 +804,27 @@ parse_statement :: proc(tokens: []Token, labels: [dynamic]string = nil) -> (^Ast
 
     result.labels = labels
     return result, tokens
+}
+
+parse_block_statement_list :: proc(tokens: []Token) -> ([dynamic]^Ast_Node, []Token) {
+    tokens := tokens
+    list := make([dynamic]^Ast_Node)
+    for token := peek_first_token(tokens); token.type != .RBrace; token = peek_first_token(tokens) {
+        // Skip null statements
+        if token.type == .Semicolon {
+            tokens = tokens[1:]
+            continue
+        }
+        block_statement: ^Ast_Node = ---
+        block_statement, tokens = parse_block_statement(tokens)
+        append(&list, block_statement)
+    }
+
+    token: Token = ---
+    token, tokens = take_first_token(tokens)
+    if token.type != .RBrace do parse_error(token, tokens)
+
+    return list, tokens
 }
 
 parse_function :: proc(tokens: []Token) -> (^Ast_Node, []Token) {
@@ -824,22 +848,8 @@ parse_function :: proc(tokens: []Token) -> (^Ast_Node, []Token) {
     token, tokens = take_first_token(tokens)
     if token.type != .LBrace do parse_error(token, tokens)
 
-    body := make([dynamic]^Ast_Node)
-    for tokens[0].type != .RBrace {
-        // Skip null statements
-        if tokens[0].type == .Semicolon {
-            tokens = tokens[1:]
-            continue
-        }
-        block_statement: ^Ast_Node = ---
-        block_statement, tokens = parse_block_statement(tokens)
-        append(&body, block_statement)
-
-        if len(tokens) == 0 do parse_error({}, {})
-    }
-
-    token, tokens = take_first_token(tokens)
-    if token.type != .RBrace do parse_error(token, tokens)
+    body: [dynamic]^Ast_Node = ---
+    body, tokens = parse_block_statement_list(tokens)
 
     // @HACK: This will need to change when we parse multiple functions
     if len(tokens) > 0 do parse_error(token, tokens)
