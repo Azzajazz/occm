@@ -730,14 +730,18 @@ parse_block_statement :: proc(tokens: []Token) -> (^Ast_Node, []Token) {
             }
 
         case:
-            return parse_statement(tokens)
+            return parse_statement(tokens, label, false)
     }
     
     panic("Unreachable")
 }
 
-parse_statement :: proc(tokens: []Token) -> (^Ast_Node, []Token) {
-    label, tokens := parse_label(tokens)
+parse_statement :: proc(tokens: []Token, label := "", should_parse_label := true) -> (^Ast_Node, []Token) {
+    tokens := tokens
+    label := label
+    if should_parse_label {
+        label, tokens = parse_label(tokens)
+    }
     token := peek_first_token(tokens)
 
     result: ^Ast_Node = ---
@@ -876,6 +880,7 @@ gather_labels :: proc(program: Program) -> [dynamic]string {
 
 gather_function_labels :: proc(function: Function_Node, labels: ^[dynamic]string) {
     for block_statement in function.body {
+        fmt.println(block_statement)
         if block_statement.label != "" {
             if contains(block_statement.label, labels[:]) do semantic_error()
             append(labels, block_statement.label)
