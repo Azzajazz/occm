@@ -885,43 +885,35 @@ semantic_error :: proc(location := #caller_location) {
     os.exit(4)
 }
 
-gather_labels :: proc(program: Program) -> map[string][dynamic]string {
-    labels := make(map[string][dynamic]string)
-
-    for node in program.children {
-        function := node.variant.(Function_Node)
-        labels[function.name] = make([dynamic]string)
-        gather_function_labels(function, &labels[function.name])
+validate_and_gather_block_statement_labels :: proc(block_statement: ^Ast_Node, labels: ^[dynamic]string) {
+    for label in block_statement.labels {
+        if contains(label, labels[:]) do semantic_error()
+        append(labels, label)
     }
-
-    return labels
 }
 
-gather_function_labels :: proc(function: Function_Node, labels: ^[dynamic]string) {
+validate_and_gather_function_labels :: proc(function: Function_Node) -> [dynamic]string {
+    labels := make([dynamic]string)
+
     for block_statement in function.body {
-        for label in block_statement.labels {
-            if contains(label, labels[:]) do semantic_error()
-            append(labels, label)
-        }
+        validate_and_gather_block_statement_labels(block_statement, &labels)
 
         #partial switch stmt in block_statement.variant {
             case If_Node:
-            for label in stmt.if_true.labels {
-                if contains(label, labels[:]) do semantic_error()
-                append(labels, label)
-            }
+                validate_and_gather_block_statement_labels(stmt.if_true, &labels)
 
             case If_Else_Node:
-            for label in stmt.if_true.labels {
-                if contains(label, labels[:]) do semantic_error()
-                append(labels, label)
-            }
-            for label in stmt.if_false.labels {
-                if contains(label, labels[:]) do semantic_error()
-                append(labels, label)
-            }
+                validate_and_gather_block_statement_labels(stmt.if_true, &labels)
+                validate_and_gather_block_statement_labels(stmt.if_false, &labels)
+
+            case Compound_Statement_Node:
+                for block_statement in stmt.statements {
+                    validate_and_gather_block_statement_labels(block_statement, &labels)
+                }
         }
     }
+
+    return labels
 }
 
 Scoped_Variables :: struct {
@@ -1101,57 +1093,57 @@ validate_expr :: proc(expr: ^Ast_Node, vars: ^Scoped_Variables) {
         case Equal_Node:
             ident, is_ident := e.left.variant.(Ident_Node)
             if !is_ident do semantic_error()
-            if ident.var_name not_in vars.var_offsets do semantic_error()
+            if !is_defined(vars, ident.var_name) do semantic_error()
             validate_expr(e.right, vars)
         case Plus_Equal_Node:
             ident, is_ident := e.left.variant.(Ident_Node)
             if !is_ident do semantic_error()
-            if ident.var_name not_in vars.var_offsets do semantic_error()
+            if !is_defined(vars, ident.var_name) do semantic_error()
             validate_expr(e.right, vars)
         case Minus_Equal_Node:
             ident, is_ident := e.left.variant.(Ident_Node)
             if !is_ident do semantic_error()
-            if ident.var_name not_in vars.var_offsets do semantic_error()
+            if !is_defined(vars, ident.var_name) do semantic_error()
             validate_expr(e.right, vars)
         case Times_Equal_Node:
             ident, is_ident := e.left.variant.(Ident_Node)
             if !is_ident do semantic_error()
-            if ident.var_name not_in vars.var_offsets do semantic_error()
+            if !is_defined(vars, ident.var_name) do semantic_error()
             validate_expr(e.right, vars)
         case Divide_Equal_Node:
             ident, is_ident := e.left.variant.(Ident_Node)
             if !is_ident do semantic_error()
-            if ident.var_name not_in vars.var_offsets do semantic_error()
+            if !is_defined(vars, ident.var_name) do semantic_error()
             validate_expr(e.right, vars)
         case Modulo_Equal_Node:
             ident, is_ident := e.left.variant.(Ident_Node)
             if !is_ident do semantic_error()
-            if ident.var_name not_in vars.var_offsets do semantic_error()
+            if !is_defined(vars, ident.var_name) do semantic_error()
             validate_expr(e.right, vars)
         case Xor_Equal_Node:
             ident, is_ident := e.left.variant.(Ident_Node)
             if !is_ident do semantic_error()
-            if ident.var_name not_in vars.var_offsets do semantic_error()
+            if !is_defined(vars, ident.var_name) do semantic_error()
             validate_expr(e.right, vars)
         case Or_Equal_Node:
             ident, is_ident := e.left.variant.(Ident_Node)
             if !is_ident do semantic_error()
-            if ident.var_name not_in vars.var_offsets do semantic_error()
+            if !is_defined(vars, ident.var_name) do semantic_error()
             validate_expr(e.right, vars)
         case And_Equal_Node:
             ident, is_ident := e.left.variant.(Ident_Node)
             if !is_ident do semantic_error()
-            if ident.var_name not_in vars.var_offsets do semantic_error()
+            if !is_defined(vars, ident.var_name) do semantic_error()
             validate_expr(e.right, vars)
         case Shift_Left_Equal_Node:
             ident, is_ident := e.left.variant.(Ident_Node)
             if !is_ident do semantic_error()
-            if ident.var_name not_in vars.var_offsets do semantic_error()
+            if !is_defined(vars, ident.var_name) do semantic_error()
             validate_expr(e.right, vars)
         case Shift_Right_Equal_Node:
             ident, is_ident := e.left.variant.(Ident_Node)
             if !is_ident do semantic_error()
-            if ident.var_name not_in vars.var_offsets do semantic_error()
+            if !is_defined(vars, ident.var_name) do semantic_error()
             validate_expr(e.right, vars)
 
         case Ternary_Node:
@@ -1642,6 +1634,8 @@ calculate_offsets :: proc(vars: ^Scoped_Variables, start_offset := 4) -> (end_of
 }
 
 emit_function :: proc(builder: ^strings.Builder, function: Function_Node, vars: ^Scoped_Variables) {
+    labels := validate_and_gather_function_labels(function)
+
     fmt.sbprintfln(builder, ".globl %v", function.name)
     fmt.sbprintfln(builder, "%v:", function.name)
     fmt.sbprintln(builder, "  push %rbp")
@@ -1696,13 +1690,8 @@ compile_to_assembly :: proc(source_file: string) -> (asm_file: string) {
         pretty_print_program(program)
     }
 
-    labels := gather_labels(program)
-    when LOG {
-        fmt.println("\n\n------ LABELS ------")
-        fmt.println(labels)
-    }
     
-    vars := validate_and_gather_variables(program, labels)
+    vars := validate_and_gather_variables(program, make(map[string][dynamic]string))
     when LOG {
         fmt.println("\n\n------ VARIABLE MAP ------")
         print_scoped_variables(vars)
