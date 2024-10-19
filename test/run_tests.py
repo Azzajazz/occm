@@ -103,11 +103,14 @@ def main():
 
     if not args.norebuild:
         os.chdir("..")
-        subprocess.run(
+        build_result = subprocess.run(
                 ["odin", "build", "."],
                 stdout=subprocess.DEVNULL,
                 stderr=subprocess.DEVNULL
             )               
+        if build_result.returncode != 0:
+            print("ABORT: Compiler build failed")
+            return
         os.chdir("test")
 
     if args.only:
