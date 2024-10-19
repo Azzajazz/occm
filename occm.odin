@@ -1559,6 +1559,12 @@ count_function_variable_declarations :: proc(function: Function_Node) -> int {
                     declarations += count_compound_statement_variable_declarations(compound)
                 }
 
+            case For_Node:
+                #partial switch pre in stmt.pre_condition.variant {
+                    case Decl_Node, Decl_Assign_Node:
+                        declarations += 1
+                }
+
             case Compound_Statement_Node:
                 declarations += count_compound_statement_variable_declarations(stmt)
         }
