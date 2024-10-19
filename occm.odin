@@ -1539,51 +1539,43 @@ count_function_variable_declarations :: proc(function: Function_Node) -> int {
     declarations := 0
 
     for block_statement in function.body {
-        #partial switch stmt in block_statement.variant {
-            case Decl_Node, Decl_Assign_Node:
-                declarations += 1
-
-            case If_Node:
-                compound, is_compound := stmt.if_true.variant.(Compound_Statement_Node)
-                if is_compound {
-                    declarations += count_compound_statement_variable_declarations(compound)
-                }
-
-            case If_Else_Node:
-                compound, is_compound := stmt.if_true.variant.(Compound_Statement_Node)
-                if is_compound {
-                    declarations += count_compound_statement_variable_declarations(compound)
-                }
-                compound, is_compound = stmt.if_false.variant.(Compound_Statement_Node)
-                if is_compound {
-                    declarations += count_compound_statement_variable_declarations(compound)
-                }
-
-            case For_Node:
-                #partial switch pre in stmt.pre_condition.variant {
-                    case Decl_Node, Decl_Assign_Node:
-                        declarations += 1
-                }
-
-            case Compound_Statement_Node:
-                declarations += count_compound_statement_variable_declarations(stmt)
-        }
+        declarations += count_block_statement_variable_declarations(block_statement)
     }
 
     return declarations
 }
 
-count_compound_statement_variable_declarations :: proc(compound_statement: Compound_Statement_Node) -> int {
+count_block_statement_variable_declarations :: proc(block_statement: ^Ast_Node) -> int {
     declarations := 0
 
-    for block_statement in compound_statement.statements {
-        #partial switch stmt in block_statement.variant {
-            case Decl_Node, Decl_Assign_Node:
-                declarations += 1
+    #partial switch stmt in block_statement.variant {
+        case Decl_Node, Decl_Assign_Node:
+            declarations += 1
 
-            case Compound_Statement_Node:
-                declarations += count_compound_statement_variable_declarations(stmt)
-        }
+        case If_Node:
+            declarations += count_block_statement_variable_declarations(stmt.if_true)
+
+        case If_Else_Node:
+            declarations += count_block_statement_variable_declarations(stmt.if_true)
+            declarations += count_block_statement_variable_declarations(stmt.if_false)
+
+        case While_Node:
+            declarations += count_block_statement_variable_declarations(stmt.if_true)            
+
+        case Do_While_Node:
+            declarations += count_block_statement_variable_declarations(stmt.if_true)            
+
+        case For_Node:
+            #partial switch pre in stmt.pre_condition.variant {
+                case Decl_Node, Decl_Assign_Node:
+                    declarations += 1
+            }
+            declarations += count_block_statement_variable_declarations(stmt.if_true)            
+
+        case Compound_Statement_Node:
+            for statement in stmt.statements {
+                declarations += count_block_statement_variable_declarations(statement)
+            }
     }
 
     return declarations
