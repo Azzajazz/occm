@@ -1139,6 +1139,12 @@ is_defined :: proc(offsets: ^Scoped_Variable_Offsets, var_name: string) -> bool 
     }
 }
 
+validate_lvalue :: proc(offsets: ^Scoped_Variable_Offsets, lvalue: ^Ast_Node) {
+    ident, is_ident := lvalue.variant.(Ident_Node)
+    if !is_ident do semantic_error()
+    if !is_defined(offsets, ident.var_name) do semantic_error()
+}
+
 current_label := 1
 current_offset := 4
 
@@ -1169,18 +1175,22 @@ emit_unary_op :: proc(builder: ^strings.Builder, op: ^Ast_Node, offsets: ^Scoped
             fmt.sbprintln(builder, "  sete %al")
 
         case Pre_Decrement_Node:
+            validate_lvalue(offsets, o.expr)
             fmt.sbprintfln(builder, "  decl -%v(%%rbp)", get_offset(offsets, o.expr.variant.(Ident_Node).var_name))
             fmt.sbprintfln(builder, "  mov -%v(%%rbp), %%eax", get_offset(offsets, o.expr.variant.(Ident_Node).var_name))
 
         case Pre_Increment_Node:
+            validate_lvalue(offsets, o.expr)
             fmt.sbprintfln(builder, "  incl -%v(%%rbp)", get_offset(offsets, o.expr.variant.(Ident_Node).var_name))
             fmt.sbprintfln(builder, "  mov -%v(%%rbp), %%eax", get_offset(offsets, o.expr.variant.(Ident_Node).var_name))
 
         case Post_Decrement_Node:
+            validate_lvalue(offsets, o.expr)
             fmt.sbprintfln(builder, "  mov -%v(%%rbp), %%eax", get_offset(offsets, o.expr.variant.(Ident_Node).var_name))
             fmt.sbprintfln(builder, "  decl -%v(%%rbp)", get_offset(offsets, o.expr.variant.(Ident_Node).var_name))
 
         case Post_Increment_Node:
+            validate_lvalue(offsets, o.expr)
             fmt.sbprintfln(builder, "  mov -%v(%%rbp), %%eax", get_offset(offsets, o.expr.variant.(Ident_Node).var_name))
             fmt.sbprintfln(builder, "  incl -%v(%%rbp)", get_offset(offsets, o.expr.variant.(Ident_Node).var_name))
 
@@ -1375,16 +1385,19 @@ emit_assign_op :: proc(builder: ^strings.Builder, op: ^Ast_Node, offsets: ^Scope
     pretty_print_node(op^)
     #partial switch o in op.variant {
         case Equal_Node:
+            validate_lvalue(offsets, o.left)
             emit_expr(builder, o.right, offsets)
             fmt.sbprintfln(builder, "  mov %%eax, -%v(%%rbp)", get_offset(offsets, o.left.variant.(Ident_Node).var_name))
 
         case Plus_Equal_Node:
+            validate_lvalue(offsets, o.left)
             emit_expr(builder, o.right, offsets)
             fmt.sbprintfln(builder, "  mov -%v(%%rbp), %%ebx", get_offset(offsets, o.left.variant.(Ident_Node).var_name))
             fmt.sbprintln(builder, "  add %ebx, %eax")
             fmt.sbprintfln(builder, "  mov %%eax, -%v(%%rbp)", get_offset(offsets, o.left.variant.(Ident_Node).var_name))
             
         case Minus_Equal_Node:
+            validate_lvalue(offsets, o.left)
             emit_expr(builder, o.right, offsets)
             fmt.sbprintln(builder, "  mov %eax, %ebx")
             fmt.sbprintfln(builder, "  mov -%v(%%rbp), %%eax", get_offset(offsets, o.left.variant.(Ident_Node).var_name))
@@ -1392,12 +1405,14 @@ emit_assign_op :: proc(builder: ^strings.Builder, op: ^Ast_Node, offsets: ^Scope
             fmt.sbprintfln(builder, "  mov %%eax, -%v(%%rbp)", get_offset(offsets, o.left.variant.(Ident_Node).var_name))
 
         case Times_Equal_Node:
+            validate_lvalue(offsets, o.left)
             emit_expr(builder, o.right, offsets)
             fmt.sbprintfln(builder, "  mov -%v(%%rbp), %%ebx", get_offset(offsets, o.left.variant.(Ident_Node).var_name))
             fmt.sbprintln(builder, "  imul %ebx, %eax")
             fmt.sbprintfln(builder, "  mov %%eax, -%v(%%rbp)", get_offset(offsets, o.left.variant.(Ident_Node).var_name))
 
         case Divide_Equal_Node:
+            validate_lvalue(offsets, o.left)
             emit_expr(builder, o.right, offsets)
             fmt.sbprintln(builder, "  mov %eax, %ebx")
             fmt.sbprintfln(builder, "  mov -%v(%%rbp), %%eax", get_offset(offsets, o.left.variant.(Ident_Node).var_name))
@@ -1410,6 +1425,7 @@ emit_assign_op :: proc(builder: ^strings.Builder, op: ^Ast_Node, offsets: ^Scope
             fmt.sbprintfln(builder, "  mov %%eax, -%v(%%rbp)", get_offset(offsets, o.left.variant.(Ident_Node).var_name))
 
         case Modulo_Equal_Node:
+            validate_lvalue(offsets, o.left)
             emit_expr(builder, o.right, offsets)
             fmt.sbprintln(builder, "  mov %eax, %ebx")
             fmt.sbprintfln(builder, "  mov -%v(%%rbp), %%eax", get_offset(offsets, o.left.variant.(Ident_Node).var_name))
@@ -1423,24 +1439,28 @@ emit_assign_op :: proc(builder: ^strings.Builder, op: ^Ast_Node, offsets: ^Scope
             fmt.sbprintln(builder, "  mov %edx, %eax")
 
         case Xor_Equal_Node:
+            validate_lvalue(offsets, o.left)
             emit_expr(builder, o.right, offsets)
             fmt.sbprintfln(builder, "  mov -%v(%%rbp), %%ebx", get_offset(offsets, o.left.variant.(Ident_Node).var_name))
             fmt.sbprintln(builder, "  xor %ebx, %eax")
             fmt.sbprintfln(builder, "  mov %%eax, -%v(%%rbp)", get_offset(offsets, o.left.variant.(Ident_Node).var_name))
 
         case Or_Equal_Node:
+            validate_lvalue(offsets, o.left)
             emit_expr(builder, o.right, offsets)
             fmt.sbprintfln(builder, "  mov -%v(%%rbp), %%ebx", get_offset(offsets, o.left.variant.(Ident_Node).var_name))
             fmt.sbprintln(builder, "  or %ebx, %eax")
             fmt.sbprintfln(builder, "  mov %%eax, -%v(%%rbp)", get_offset(offsets, o.left.variant.(Ident_Node).var_name))
 
         case And_Equal_Node:
+            validate_lvalue(offsets, o.left)
             emit_expr(builder, o.right, offsets)
             fmt.sbprintfln(builder, "  mov -%v(%%rbp), %%ebx", get_offset(offsets, o.left.variant.(Ident_Node).var_name))
             fmt.sbprintln(builder, "  and %ebx, %eax")
             fmt.sbprintfln(builder, "  mov %%eax, -%v(%%rbp)", get_offset(offsets, o.left.variant.(Ident_Node).var_name))
 
         case Shift_Left_Equal_Node:
+            validate_lvalue(offsets, o.left)
             emit_expr(builder, o.right, offsets)
             fmt.sbprintln(builder, "  mov %eax, %ecx")
             fmt.sbprintfln(builder, "  mov -%v(%%rbp), %%eax", get_offset(offsets, o.left.variant.(Ident_Node).var_name))
@@ -1448,6 +1468,7 @@ emit_assign_op :: proc(builder: ^strings.Builder, op: ^Ast_Node, offsets: ^Scope
             fmt.sbprintfln(builder, "  mov %%eax, -%v(%%rbp)", get_offset(offsets, o.left.variant.(Ident_Node).var_name))
 
         case Shift_Right_Equal_Node:
+            validate_lvalue(offsets, o.left)
             emit_expr(builder, o.right, offsets)
             fmt.sbprintln(builder, "  mov %eax, %ecx")
             fmt.sbprintfln(builder, "  mov -%v(%%rbp), %%eax", get_offset(offsets, o.left.variant.(Ident_Node).var_name))
