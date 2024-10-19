@@ -107,7 +107,7 @@ def do_tests(dirname: str):
         do_test(dirname, dirname)
 
     for root, dirs, files in os.walk(dirname):
-        for file in filter(lambda f: f.endswith(".c")):
+        for file in filter(lambda f: f.endswith(".c"), files):
             source_path = os.path.join(root, file)
             do_test(root, source_path)
 
