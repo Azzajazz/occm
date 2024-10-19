@@ -890,6 +890,20 @@ validate_and_gather_block_statement_labels :: proc(block_statement: ^Ast_Node, l
         if contains(label, labels[:]) do semantic_error()
         append(labels, label)
     }
+
+    #partial switch stmt in block_statement.variant {
+        case If_Node:
+            validate_and_gather_block_statement_labels(stmt.if_true, labels)
+
+        case If_Else_Node:
+            validate_and_gather_block_statement_labels(stmt.if_true, labels)
+            validate_and_gather_block_statement_labels(stmt.if_false, labels)
+
+        case Compound_Statement_Node:
+            for statement in stmt.statements {
+                validate_and_gather_block_statement_labels(statement, labels)
+            }
+    }
 }
 
 validate_and_gather_function_labels :: proc(function: Function_Node) -> [dynamic]string {
@@ -897,20 +911,6 @@ validate_and_gather_function_labels :: proc(function: Function_Node) -> [dynamic
 
     for block_statement in function.body {
         validate_and_gather_block_statement_labels(block_statement, &labels)
-
-        #partial switch stmt in block_statement.variant {
-            case If_Node:
-                validate_and_gather_block_statement_labels(stmt.if_true, &labels)
-
-            case If_Else_Node:
-                validate_and_gather_block_statement_labels(stmt.if_true, &labels)
-                validate_and_gather_block_statement_labels(stmt.if_false, &labels)
-
-            case Compound_Statement_Node:
-                for block_statement in stmt.statements {
-                    validate_and_gather_block_statement_labels(block_statement, &labels)
-                }
-        }
     }
 
     return labels
@@ -1179,8 +1179,6 @@ emit_binary_op :: proc(builder: ^strings.Builder, op: ^Ast_Node, vars: ^Scoped_V
 }
 
 emit_assign_op :: proc(builder: ^strings.Builder, op: ^Ast_Node, offsets: ^Scoped_Variable_Offsets, labels: ^[dynamic]string) {
-    fmt.println("\n\nEmitting assignment operator:")
-    pretty_print_node(op^)
     #partial switch o in op.variant {
         case Equal_Node:
             validate_lvalue(offsets, o.left)
@@ -1280,8 +1278,6 @@ emit_assign_op :: proc(builder: ^strings.Builder, op: ^Ast_Node, offsets: ^Scope
 }
 
 emit_expr :: proc(builder: ^strings.Builder, expr: ^Ast_Node, vars: ^Scoped_Variable_Offsets, labels: ^[dynamic]string) {
-    fmt.println("\n\nEmitting expression:")
-    pretty_print_node(expr^)
     #partial switch e in expr.variant {
         case Int_Constant_Node:
             fmt.sbprintfln(builder, "  mov $%v, %%eax", e.value)
@@ -1349,18 +1345,16 @@ emit_expr :: proc(builder: ^strings.Builder, expr: ^Ast_Node, vars: ^Scoped_Vari
 }
 
 emit_block_statement :: proc(builder: ^strings.Builder, block_statement: ^Ast_Node, offsets: ^Scoped_Variable_Offsets, labels: ^[dynamic]string, function_name: string) {
-    fmt.println("\n\nEmitting block statement:")
-    pretty_print_node(block_statement^)
     #partial switch stmt in block_statement.variant {
         case Decl_Assign_Node:
-            if is_defined(offsets, stmt.var_name) do semantic_error()
+            if stmt.var_name in offsets.var_offsets do semantic_error()
             offsets.var_offsets[stmt.var_name] = current_offset
             current_offset += 4
             emit_expr(builder, stmt.right, offsets, labels)
             fmt.sbprintfln(builder, "  mov %%eax, -%v(%%rbp)", get_offset(offsets, stmt.var_name))
 
         case Decl_Node: // Space on the stack is already allocated by emit_function
-            if is_defined(offsets, stmt.var_name) do semantic_error()
+            if stmt.var_name in offsets.var_offsets do semantic_error()
             offsets.var_offsets[stmt.var_name] = current_offset
             current_offset += 4
 
@@ -1371,8 +1365,6 @@ emit_block_statement :: proc(builder: ^strings.Builder, block_statement: ^Ast_No
 }
 
 emit_statement :: proc(builder: ^strings.Builder, statement: ^Ast_Node, parent_offsets: ^Scoped_Variable_Offsets, labels: ^[dynamic]string, function_name: string) {
-    fmt.println("\n\nEmitting statement:")
-    pretty_print_node(statement^)
     for label in statement.labels {
         fmt.sbprintfln(builder, "_%v:", label)
     }
@@ -1406,6 +1398,7 @@ emit_statement :: proc(builder: ^strings.Builder, statement: ^Ast_Node, parent_o
             emit_label(builder, label + 1)
 
         case Goto_Node:
+            fmt.println(labels)
             if !contains(stmt.label, labels[:]) do semantic_error()
             fmt.sbprintfln(builder, "  jmp _%v", stmt.label)
 
@@ -1454,6 +1447,22 @@ count_function_variable_declarations :: proc(function: Function_Node) -> int {
             case Decl_Node, Decl_Assign_Node:
                 declarations += 1
 
+            case If_Node:
+                compound, is_compound := stmt.if_true.variant.(Compound_Statement_Node)
+                if is_compound {
+                    declarations += count_compound_statement_variable_declarations(compound)
+                }
+
+            case If_Else_Node:
+                compound, is_compound := stmt.if_true.variant.(Compound_Statement_Node)
+                if is_compound {
+                    declarations += count_compound_statement_variable_declarations(compound)
+                }
+                compound, is_compound = stmt.if_false.variant.(Compound_Statement_Node)
+                if is_compound {
+                    declarations += count_compound_statement_variable_declarations(compound)
+                }
+
             case Compound_Statement_Node:
                 declarations += count_compound_statement_variable_declarations(stmt)
         }
@@ -1479,7 +1488,6 @@ count_compound_statement_variable_declarations :: proc(compound_statement: Compo
 }
 
 emit_function :: proc(builder: ^strings.Builder, function: Function_Node, parent_offsets: ^Scoped_Variable_Offsets) {
-    fmt.println("Emitting function ", function.name)
     labels := validate_and_gather_function_labels(function)
 
     fmt.sbprintfln(builder, ".globl %v", function.name)
