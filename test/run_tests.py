@@ -96,6 +96,8 @@ def do_tests(dirname: str):
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("-path")
+    parser.add_argument("-high")
+    parser.add_argument("-low")
     parser.add_argument("-norebuild")
     args = parser.parse_args()
 
@@ -114,7 +116,12 @@ def main():
     if args.path:
         do_tests(args.path)
     else:
-        do_tests(".")
+        low = 1
+        if args.low: low = int(args.low)
+        high = 18 
+        if args.high: high = int(args.high)
+        for i in range(low, high + 1):
+            do_tests(f"chapter_{i}")
 
     print(f"Passed: {passed}, Failed: {failed}")
 
