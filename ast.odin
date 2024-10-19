@@ -61,6 +61,9 @@ Ast_Node :: struct {
         Ternary_Node,
         If_Node,
         If_Else_Node,
+        While_Node,
+        Do_While_Node,
+        For_Node,
     },
 }
 
@@ -162,6 +165,15 @@ If_Node :: struct {
 }
 
 If_Else_Node :: distinct Ternary_Node
+While_Node :: distinct If_Node
+Do_While_Node :: distinct If_Node
+
+For_Node :: struct {
+    pre_condition: ^Ast_Node,
+    condition: ^Ast_Node,
+    post_condition: ^Ast_Node,
+    if_true: ^Ast_Node,
+}
 
 make_node_0 :: proc($T: typeid) -> ^Ast_Node {
     node := new(Ast_Node)
@@ -184,6 +196,12 @@ make_node_2 :: proc($T: typeid, first: $F, second: $S) -> ^Ast_Node {
 make_node_3 :: proc($T: typeid, first: $F, second: $S, third: $H) -> ^Ast_Node {
     node := new(Ast_Node)
     node.variant = T{first, second, third}
+    return node
+}
+
+make_node_4 :: proc($T: typeid, first: $F, second: $S, third: $H, fourth: $O) -> ^Ast_Node {
+    node := new(Ast_Node)
+    node.variant = T{first, second, third, fourth}
     return node
 }
 

@@ -55,6 +55,9 @@ Token_Type :: enum {
     IfKeyword,
     ElseKeyword,
     GotoKeyword,
+    WhileKeyword,
+    DoKeyword,
+    ForKeyword,
     Ident,
     IntConstant,
     Semicolon,
@@ -100,6 +103,9 @@ get_keyword_or_ident_token :: proc(input: string) -> (token: Token, rest: string
     else if text == "if" do return Token{.IfKeyword, text, {}}, input[byte_index:]
     else if text == "else" do return Token{.ElseKeyword, text, {}}, input[byte_index:]
     else if text == "goto" do return Token{.GotoKeyword, text, {}}, input[byte_index:]
+    else if text == "while" do return Token{.WhileKeyword, text, {}}, input[byte_index:]
+    else if text == "do" do return Token{.DoKeyword, text, {}}, input[byte_index:]
+    else if text == "for" do return Token{.ForKeyword, text, {}}, input[byte_index:]
     else do return Token{.Ident, text, {}}, input[byte_index:]
 }
 
@@ -789,6 +795,61 @@ parse_statement :: proc(tokens: []Token, labels: [dynamic]string = nil) -> (^Ast
             if token.type != .Semicolon do parse_error(token, tokens)
             result = make_node_1(Goto_Node, label)
 
+        case .WhileKeyword:
+            tokens = tokens[1:]
+            token, tokens = take_first_token(tokens)
+            if token.type != .LParen do parse_error(token, tokens)
+            condition: ^Ast_Node = ---
+            condition, tokens = parse_expression(tokens)
+            token, tokens = take_first_token(tokens)
+            if token.type != .RParen do parse_error(token, tokens)
+            if_true: ^Ast_Node = ---
+            if_true, tokens = parse_statement(tokens)
+            result = make_node_2(While_Node, condition, if_true)
+
+        case .DoKeyword:
+            tokens = tokens[1:]
+            if_true: ^Ast_Node = ---
+            if_true, tokens = parse_statement(tokens)
+            token, tokens = take_first_token(tokens)
+            if token.type != .WhileKeyword do parse_error(token, tokens)
+            token, tokens = take_first_token(tokens)
+            if token.type != .LParen do parse_error(token, tokens)
+            condition: ^Ast_Node = ---
+            condition, tokens = parse_expression(tokens)
+            token, tokens = take_first_token(tokens)
+            if token.type != .RParen do parse_error(token, tokens)
+            result = make_node_2(Do_While_Node, condition, if_true)
+            token, tokens := take_first_token(tokens)
+            if token.type != .Semicolon do parse_error(token, tokens)
+
+        case .ForKeyword:
+            tokens = tokens[1:]
+            token, tokens = take_first_token(tokens)
+            if token.type != .LParen do parse_error(token, tokens)
+            pre_condition: ^Ast_Node = ---
+            pre_condition, tokens = parse_block_statement(tokens)
+
+            condition: ^Ast_Node = ---
+            token := peek_first_token(tokens)
+            if token.type == .Semicolon {
+                condition = make_node_1(Int_Constant_Node, 1) // If expression is empty, replace it with a condition that is always true
+            }
+            else {
+                condition, tokens = parse_expression(tokens)
+            }
+            token, tokens = take_first_token(tokens)
+            if token.type != .Semicolon do parse_error(token, tokens)
+
+            post_condition: ^Ast_Node = ---
+            post_condition, tokens = parse_expression(tokens)
+            token, tokens = take_first_token(tokens)
+
+            if token.type != .RParen do parse_error(token, tokens)
+            if_true: ^Ast_Node = ---
+            if_true, tokens = parse_statement(tokens)
+            result = make_node_4(For_Node, pre_condition, condition, post_condition, if_true)
+
         case .Semicolon:
             tokens = tokens[1:]
             result = make_node_0(Null_Statement_Node)
@@ -1395,6 +1456,41 @@ emit_statement :: proc(builder: ^strings.Builder, statement: ^Ast_Node, parent_o
             fmt.sbprintfln(builder, "  jmp L%v", label + 1)
             emit_label(builder, label)
             emit_statement(builder, stmt.if_false, parent_offsets, labels, function_name)
+            emit_label(builder, label + 1)
+
+        case While_Node:
+            label := current_label
+            current_label += 2
+            emit_label(builder, label)
+            emit_expr(builder, stmt.condition, parent_offsets, labels)
+            fmt.sbprintln(builder, "  cmp $0, %eax")
+            fmt.sbprintfln(builder, "  je L%v", label + 1)
+            emit_statement(builder, stmt.if_true, parent_offsets, labels, function_name)
+            fmt.sbprintfln(builder, "  jmp L%v", label)
+            emit_label(builder, label + 1)
+
+        case Do_While_Node:
+            label := current_label
+            current_label += 2
+            emit_label(builder, label)
+            emit_statement(builder, stmt.if_true, parent_offsets, labels, function_name)
+            emit_expr(builder, stmt.condition, parent_offsets, labels)
+            fmt.sbprintln(builder, "  cmp $0, %eax")
+            fmt.sbprintfln(builder, "  je L%v", label + 1)
+            fmt.sbprintfln(builder, "  jmp L%v", label)
+            emit_label(builder, label + 1)
+
+        case For_Node:
+            label := current_label
+            current_label += 2
+            emit_block_statement(builder, stmt.pre_condition, parent_offsets, labels, function_name)
+            emit_label(builder, label)
+            emit_expr(builder, stmt.condition, parent_offsets, labels)
+            fmt.sbprintln(builder, "  cmp $0, %eax")
+            fmt.sbprintfln(builder, "  je L%v", label + 1)
+            emit_statement(builder, stmt.if_true, parent_offsets, labels, function_name)
+            emit_expr(builder, stmt.post_condition, parent_offsets, labels)
+            fmt.sbprintfln(builder, "  jmp L%v", label)
             emit_label(builder, label + 1)
 
         case Goto_Node:
