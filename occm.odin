@@ -916,43 +916,7 @@ validate_and_gather_function_labels :: proc(function: Function_Node) -> [dynamic
     return labels
 }
 
-Scoped_Variables :: struct {
-    parent: ^Scoped_Variables,
-    var_offsets: map[string]int, // Stores offsets, filled in by emit_function
-    children: map[^Ast_Node]^Scoped_Variables
-}
-
-make_scoped_variables :: proc(parent: ^Scoped_Variables, node: ^Ast_Node) -> ^Scoped_Variables {
-    vars := new(Scoped_Variables)
-    vars.parent = parent
-    vars.var_offsets = make(map[string]int)
-    parent.children[node] = vars
-    return vars
-}
-
-print_scoped_variables :: proc(vars: ^Scoped_Variables, indent := 0) {
-    print_indent(indent)
-    fmt.print("vars=(")
-    if len(vars.var_offsets) != 0 {
-        fmt.println()
-        for var in vars.var_offsets {
-            print_indent(indent + 1)
-            fmt.println(var)
-        }
-        print_indent(indent)
-    }
-
-    fmt.print("), children = (")
-    if len(vars.children) != 0 {
-        fmt.println()
-        for _, child in vars.children {
-            print_scoped_variables(child, indent + 1)
-        }
-        print_indent(indent)
-    }
-    fmt.println(")")
-}
-
+/*
 validate_and_gather_variables :: proc(program: Program, labels: map[string][dynamic]string) -> ^Scoped_Variables {
     scoped_vars := new(Scoped_Variables)
 
@@ -1152,29 +1116,31 @@ validate_expr :: proc(expr: ^Ast_Node, vars: ^Scoped_Variables) {
             validate_expr(e.if_false, vars)
     }
 }
+*/
 
-get_offset :: proc(vars: ^Scoped_Variables, var_name: string) -> int {
-    offset, ok := vars.var_offsets[var_name]
+get_offset :: proc(offsets: ^Scoped_Variable_Offsets, var_name: string) -> int {
+    offset, ok := offsets.var_offsets[var_name]
     if ok {
         return offset
     }
     else {
-        return get_offset(vars.parent, var_name)
+        return get_offset(offsets.parent, var_name)
     }
 }
 
-is_defined :: proc(vars: ^Scoped_Variables, var_name: string) -> bool {
-    if vars.parent == nil do return var_name in vars.var_offsets
+is_defined :: proc(offsets: ^Scoped_Variable_Offsets, var_name: string) -> bool {
+    if offsets.parent == nil do return var_name in offsets.var_offsets
 
-    if var_name in vars.var_offsets {
+    if var_name in offsets.var_offsets {
         return true
     }
     else {
-        return is_defined(vars.parent, var_name)
+        return is_defined(offsets.parent, var_name)
     }
 }
 
 current_label := 1
+current_offset := 4
 
 emit_label :: proc(builder: ^strings.Builder, label := -1) {
     if label == -1 {
@@ -1186,37 +1152,37 @@ emit_label :: proc(builder: ^strings.Builder, label := -1) {
     }
 }
 
-emit_unary_op :: proc(builder: ^strings.Builder, op: ^Ast_Node, vars: ^Scoped_Variables) {
+emit_unary_op :: proc(builder: ^strings.Builder, op: ^Ast_Node, offsets: ^Scoped_Variable_Offsets) {
     #partial switch o in op.variant {
         case Negate_Node:
-            emit_expr(builder, o.expr, vars)
+            emit_expr(builder, o.expr, offsets)
             fmt.sbprintln(builder, "  neg %eax")
 
         case Bit_Negate_Node:
-            emit_expr(builder, o.expr, vars)
+            emit_expr(builder, o.expr, offsets)
             fmt.sbprintln(builder, "  not %eax")
 
         case Boolean_Negate_Node:
-            emit_expr(builder, o.expr, vars)
+            emit_expr(builder, o.expr, offsets)
             fmt.sbprintln(builder, "  cmp $0, %eax")
             fmt.sbprintln(builder, "  mov $0, %eax")
             fmt.sbprintln(builder, "  sete %al")
 
         case Pre_Decrement_Node:
-            fmt.sbprintfln(builder, "  decl -%v(%%rbp)", get_offset(vars, o.expr.variant.(Ident_Node).var_name))
-            fmt.sbprintfln(builder, "  mov -%v(%%rbp), %%eax", get_offset(vars, o.expr.variant.(Ident_Node).var_name))
+            fmt.sbprintfln(builder, "  decl -%v(%%rbp)", get_offset(offsets, o.expr.variant.(Ident_Node).var_name))
+            fmt.sbprintfln(builder, "  mov -%v(%%rbp), %%eax", get_offset(offsets, o.expr.variant.(Ident_Node).var_name))
 
         case Pre_Increment_Node:
-            fmt.sbprintfln(builder, "  incl -%v(%%rbp)", get_offset(vars, o.expr.variant.(Ident_Node).var_name))
-            fmt.sbprintfln(builder, "  mov -%v(%%rbp), %%eax", get_offset(vars, o.expr.variant.(Ident_Node).var_name))
+            fmt.sbprintfln(builder, "  incl -%v(%%rbp)", get_offset(offsets, o.expr.variant.(Ident_Node).var_name))
+            fmt.sbprintfln(builder, "  mov -%v(%%rbp), %%eax", get_offset(offsets, o.expr.variant.(Ident_Node).var_name))
 
         case Post_Decrement_Node:
-            fmt.sbprintfln(builder, "  mov -%v(%%rbp), %%eax", get_offset(vars, o.expr.variant.(Ident_Node).var_name))
-            fmt.sbprintfln(builder, "  decl -%v(%%rbp)", get_offset(vars, o.expr.variant.(Ident_Node).var_name))
+            fmt.sbprintfln(builder, "  mov -%v(%%rbp), %%eax", get_offset(offsets, o.expr.variant.(Ident_Node).var_name))
+            fmt.sbprintfln(builder, "  decl -%v(%%rbp)", get_offset(offsets, o.expr.variant.(Ident_Node).var_name))
 
         case Post_Increment_Node:
-            fmt.sbprintfln(builder, "  mov -%v(%%rbp), %%eax", get_offset(vars, o.expr.variant.(Ident_Node).var_name))
-            fmt.sbprintfln(builder, "  incl -%v(%%rbp)", get_offset(vars, o.expr.variant.(Ident_Node).var_name))
+            fmt.sbprintfln(builder, "  mov -%v(%%rbp), %%eax", get_offset(offsets, o.expr.variant.(Ident_Node).var_name))
+            fmt.sbprintfln(builder, "  incl -%v(%%rbp)", get_offset(offsets, o.expr.variant.(Ident_Node).var_name))
 
         case:
             fmt.println(op)
@@ -1224,7 +1190,7 @@ emit_unary_op :: proc(builder: ^strings.Builder, op: ^Ast_Node, vars: ^Scoped_Va
     }
 }
 
-emit_binary_op :: proc(builder: ^strings.Builder, op: ^Ast_Node, vars: ^Scoped_Variables) {
+emit_binary_op :: proc(builder: ^strings.Builder, op: ^Ast_Node, vars: ^Scoped_Variable_Offsets) {
     #partial switch o in op.variant {
         case Add_Node:
             emit_expr(builder, o.left, vars)
@@ -1404,87 +1370,89 @@ emit_binary_op :: proc(builder: ^strings.Builder, op: ^Ast_Node, vars: ^Scoped_V
     }
 }
 
-emit_assign_op :: proc(builder: ^strings.Builder, op: ^Ast_Node, vars: ^Scoped_Variables) {
+emit_assign_op :: proc(builder: ^strings.Builder, op: ^Ast_Node, offsets: ^Scoped_Variable_Offsets) {
+    fmt.println("\n\nEmitting assignment operator:")
+    pretty_print_node(op^)
     #partial switch o in op.variant {
         case Equal_Node:
-            emit_expr(builder, o.right, vars)
-            fmt.sbprintfln(builder, "  mov %%eax, -%v(%%rbp)", get_offset(vars, o.left.variant.(Ident_Node).var_name))
+            emit_expr(builder, o.right, offsets)
+            fmt.sbprintfln(builder, "  mov %%eax, -%v(%%rbp)", get_offset(offsets, o.left.variant.(Ident_Node).var_name))
 
         case Plus_Equal_Node:
-            emit_expr(builder, o.right, vars)
-            fmt.sbprintfln(builder, "  mov -%v(%%rbp), %%ebx", get_offset(vars, o.left.variant.(Ident_Node).var_name))
+            emit_expr(builder, o.right, offsets)
+            fmt.sbprintfln(builder, "  mov -%v(%%rbp), %%ebx", get_offset(offsets, o.left.variant.(Ident_Node).var_name))
             fmt.sbprintln(builder, "  add %ebx, %eax")
-            fmt.sbprintfln(builder, "  mov %%eax, -%v(%%rbp)", get_offset(vars, o.left.variant.(Ident_Node).var_name))
+            fmt.sbprintfln(builder, "  mov %%eax, -%v(%%rbp)", get_offset(offsets, o.left.variant.(Ident_Node).var_name))
             
         case Minus_Equal_Node:
-            emit_expr(builder, o.right, vars)
+            emit_expr(builder, o.right, offsets)
             fmt.sbprintln(builder, "  mov %eax, %ebx")
-            fmt.sbprintfln(builder, "  mov -%v(%%rbp), %%eax", get_offset(vars, o.left.variant.(Ident_Node).var_name))
+            fmt.sbprintfln(builder, "  mov -%v(%%rbp), %%eax", get_offset(offsets, o.left.variant.(Ident_Node).var_name))
             fmt.sbprintln(builder, "  sub %ebx, %eax")
-            fmt.sbprintfln(builder, "  mov %%eax, -%v(%%rbp)", get_offset(vars, o.left.variant.(Ident_Node).var_name))
+            fmt.sbprintfln(builder, "  mov %%eax, -%v(%%rbp)", get_offset(offsets, o.left.variant.(Ident_Node).var_name))
 
         case Times_Equal_Node:
-            emit_expr(builder, o.right, vars)
-            fmt.sbprintfln(builder, "  mov -%v(%%rbp), %%ebx", get_offset(vars, o.left.variant.(Ident_Node).var_name))
+            emit_expr(builder, o.right, offsets)
+            fmt.sbprintfln(builder, "  mov -%v(%%rbp), %%ebx", get_offset(offsets, o.left.variant.(Ident_Node).var_name))
             fmt.sbprintln(builder, "  imul %ebx, %eax")
-            fmt.sbprintfln(builder, "  mov %%eax, -%v(%%rbp)", get_offset(vars, o.left.variant.(Ident_Node).var_name))
+            fmt.sbprintfln(builder, "  mov %%eax, -%v(%%rbp)", get_offset(offsets, o.left.variant.(Ident_Node).var_name))
 
         case Divide_Equal_Node:
-            emit_expr(builder, o.right, vars)
+            emit_expr(builder, o.right, offsets)
             fmt.sbprintln(builder, "  mov %eax, %ebx")
-            fmt.sbprintfln(builder, "  mov -%v(%%rbp), %%eax", get_offset(vars, o.left.variant.(Ident_Node).var_name))
+            fmt.sbprintfln(builder, "  mov -%v(%%rbp), %%eax", get_offset(offsets, o.left.variant.(Ident_Node).var_name))
             fmt.sbprintln(builder, "  xor %edx, %edx")
             fmt.sbprintln(builder, "  cmp $0, %eax")
             fmt.sbprintfln(builder, "  jge L%v", current_label)
             fmt.sbprintln(builder, "  dec %edx")
             emit_label(builder)
             fmt.sbprintln(builder, "  idiv %ebx")
-            fmt.sbprintfln(builder, "  mov %%eax, -%v(%%rbp)", get_offset(vars, o.left.variant.(Ident_Node).var_name))
+            fmt.sbprintfln(builder, "  mov %%eax, -%v(%%rbp)", get_offset(offsets, o.left.variant.(Ident_Node).var_name))
 
         case Modulo_Equal_Node:
-            emit_expr(builder, o.right, vars)
+            emit_expr(builder, o.right, offsets)
             fmt.sbprintln(builder, "  mov %eax, %ebx")
-            fmt.sbprintfln(builder, "  mov -%v(%%rbp), %%eax", get_offset(vars, o.left.variant.(Ident_Node).var_name))
+            fmt.sbprintfln(builder, "  mov -%v(%%rbp), %%eax", get_offset(offsets, o.left.variant.(Ident_Node).var_name))
             fmt.sbprintln(builder, "  xor %edx, %edx")
             fmt.sbprintln(builder, "  cmp $0, %ebx")
             fmt.sbprintfln(builder, "  jge L%v", current_label)
             fmt.sbprintln(builder, "  dec %edx")
             emit_label(builder)
             fmt.sbprintln(builder, "  idiv %ebx")
-            fmt.sbprintfln(builder, "  mov %%edx, -%v(%%rbp)", get_offset(vars, o.left.variant.(Ident_Node).var_name))
+            fmt.sbprintfln(builder, "  mov %%edx, -%v(%%rbp)", get_offset(offsets, o.left.variant.(Ident_Node).var_name))
             fmt.sbprintln(builder, "  mov %edx, %eax")
 
         case Xor_Equal_Node:
-            emit_expr(builder, o.right, vars)
-            fmt.sbprintfln(builder, "  mov -%v(%%rbp), %%ebx", get_offset(vars, o.left.variant.(Ident_Node).var_name))
+            emit_expr(builder, o.right, offsets)
+            fmt.sbprintfln(builder, "  mov -%v(%%rbp), %%ebx", get_offset(offsets, o.left.variant.(Ident_Node).var_name))
             fmt.sbprintln(builder, "  xor %ebx, %eax")
-            fmt.sbprintfln(builder, "  mov %%eax, -%v(%%rbp)", get_offset(vars, o.left.variant.(Ident_Node).var_name))
+            fmt.sbprintfln(builder, "  mov %%eax, -%v(%%rbp)", get_offset(offsets, o.left.variant.(Ident_Node).var_name))
 
         case Or_Equal_Node:
-            emit_expr(builder, o.right, vars)
-            fmt.sbprintfln(builder, "  mov -%v(%%rbp), %%ebx", get_offset(vars, o.left.variant.(Ident_Node).var_name))
+            emit_expr(builder, o.right, offsets)
+            fmt.sbprintfln(builder, "  mov -%v(%%rbp), %%ebx", get_offset(offsets, o.left.variant.(Ident_Node).var_name))
             fmt.sbprintln(builder, "  or %ebx, %eax")
-            fmt.sbprintfln(builder, "  mov %%eax, -%v(%%rbp)", get_offset(vars, o.left.variant.(Ident_Node).var_name))
+            fmt.sbprintfln(builder, "  mov %%eax, -%v(%%rbp)", get_offset(offsets, o.left.variant.(Ident_Node).var_name))
 
         case And_Equal_Node:
-            emit_expr(builder, o.right, vars)
-            fmt.sbprintfln(builder, "  mov -%v(%%rbp), %%ebx", get_offset(vars, o.left.variant.(Ident_Node).var_name))
+            emit_expr(builder, o.right, offsets)
+            fmt.sbprintfln(builder, "  mov -%v(%%rbp), %%ebx", get_offset(offsets, o.left.variant.(Ident_Node).var_name))
             fmt.sbprintln(builder, "  and %ebx, %eax")
-            fmt.sbprintfln(builder, "  mov %%eax, -%v(%%rbp)", get_offset(vars, o.left.variant.(Ident_Node).var_name))
+            fmt.sbprintfln(builder, "  mov %%eax, -%v(%%rbp)", get_offset(offsets, o.left.variant.(Ident_Node).var_name))
 
         case Shift_Left_Equal_Node:
-            emit_expr(builder, o.right, vars)
+            emit_expr(builder, o.right, offsets)
             fmt.sbprintln(builder, "  mov %eax, %ecx")
-            fmt.sbprintfln(builder, "  mov -%v(%%rbp), %%eax", get_offset(vars, o.left.variant.(Ident_Node).var_name))
+            fmt.sbprintfln(builder, "  mov -%v(%%rbp), %%eax", get_offset(offsets, o.left.variant.(Ident_Node).var_name))
             fmt.sbprintln(builder, "  shl %cl, %eax")
-            fmt.sbprintfln(builder, "  mov %%eax, -%v(%%rbp)", get_offset(vars, o.left.variant.(Ident_Node).var_name))
+            fmt.sbprintfln(builder, "  mov %%eax, -%v(%%rbp)", get_offset(offsets, o.left.variant.(Ident_Node).var_name))
 
         case Shift_Right_Equal_Node:
-            emit_expr(builder, o.right, vars)
+            emit_expr(builder, o.right, offsets)
             fmt.sbprintln(builder, "  mov %eax, %ecx")
-            fmt.sbprintfln(builder, "  mov -%v(%%rbp), %%eax", get_offset(vars, o.left.variant.(Ident_Node).var_name))
+            fmt.sbprintfln(builder, "  mov -%v(%%rbp), %%eax", get_offset(offsets, o.left.variant.(Ident_Node).var_name))
             fmt.sbprintln(builder, "  shr %cl, %eax")
-            fmt.sbprintfln(builder, "  mov %%eax, -%v(%%rbp)", get_offset(vars, o.left.variant.(Ident_Node).var_name))
+            fmt.sbprintfln(builder, "  mov %%eax, -%v(%%rbp)", get_offset(offsets, o.left.variant.(Ident_Node).var_name))
 
         case:
             fmt.println(op)
@@ -1492,12 +1460,15 @@ emit_assign_op :: proc(builder: ^strings.Builder, op: ^Ast_Node, vars: ^Scoped_V
     }
 }
 
-emit_expr :: proc(builder: ^strings.Builder, expr: ^Ast_Node, vars: ^Scoped_Variables) {
+emit_expr :: proc(builder: ^strings.Builder, expr: ^Ast_Node, vars: ^Scoped_Variable_Offsets) {
+    fmt.println("\n\nEmitting expression:")
+    pretty_print_node(expr^)
     #partial switch e in expr.variant {
         case Int_Constant_Node:
             fmt.sbprintfln(builder, "  mov $%v, %%eax", e.value)
 
         case Ident_Node:
+            if !is_defined(vars, e.var_name) do semantic_error()
             fmt.sbprintfln(builder, "  mov -%v(%%rbp), %%eax", get_offset(vars, e.var_name))
 
         case Negate_Node: emit_unary_op(builder, expr, vars)
@@ -1558,21 +1529,31 @@ emit_expr :: proc(builder: ^strings.Builder, expr: ^Ast_Node, vars: ^Scoped_Vari
     }
 }
 
-emit_block_statement :: proc(builder: ^strings.Builder, block_statement: ^Ast_Node, vars: ^Scoped_Variables, function_name: string) {
+emit_block_statement :: proc(builder: ^strings.Builder, block_statement: ^Ast_Node, offsets: ^Scoped_Variable_Offsets, function_name: string) {
+    fmt.println("\n\nEmitting block statement:")
+    pretty_print_node(block_statement^)
     #partial switch stmt in block_statement.variant {
         case Decl_Assign_Node:
-            emit_expr(builder, stmt.right, vars)
-            fmt.sbprintfln(builder, "  mov %%eax, -%v(%%rbp)", get_offset(vars, stmt.var_name))
+            if is_defined(offsets, stmt.var_name) do semantic_error()
+            offsets.var_offsets[stmt.var_name] = current_offset
+            current_offset += 4
+            emit_expr(builder, stmt.right, offsets)
+            fmt.sbprintfln(builder, "  mov %%eax, -%v(%%rbp)", get_offset(offsets, stmt.var_name))
 
         case Decl_Node: // Space on the stack is already allocated by emit_function
+            if is_defined(offsets, stmt.var_name) do semantic_error()
+            offsets.var_offsets[stmt.var_name] = current_offset
+            current_offset += 4
 
         case:
-            emit_statement(builder, block_statement, vars, function_name)
+            emit_statement(builder, block_statement, offsets, function_name)
     }
 
 }
 
-emit_statement :: proc(builder: ^strings.Builder, statement: ^Ast_Node, vars: ^Scoped_Variables, function_name: string) {
+emit_statement :: proc(builder: ^strings.Builder, statement: ^Ast_Node, parent_offsets: ^Scoped_Variable_Offsets, function_name: string) {
+    fmt.println("\n\nEmitting statement:")
+    pretty_print_node(statement^)
     for label in statement.labels {
         fmt.sbprintfln(builder, "_%v:", label)
     }
@@ -1581,59 +1562,104 @@ emit_statement :: proc(builder: ^strings.Builder, statement: ^Ast_Node, vars: ^S
         case Null_Statement_Node: // Do nothing
 
         case Return_Node:
-            emit_expr(builder, stmt.expr, vars)
+            emit_expr(builder, stmt.expr, parent_offsets)
             fmt.sbprintfln(builder, "  jmp %v_done", function_name)
 
         case If_Node:
             label := current_label
             current_label += 1
-            emit_expr(builder, stmt.condition, vars)
+            emit_expr(builder, stmt.condition, parent_offsets)
             fmt.sbprintln(builder, "  cmp $0, %eax")
             fmt.sbprintfln(builder, "  je L%v", label)
-            emit_statement(builder, stmt.if_true, vars, function_name)
+            emit_statement(builder, stmt.if_true, parent_offsets, function_name)
             emit_label(builder, label)
 
         case If_Else_Node:
             label := current_label
             current_label += 2
-            emit_expr(builder, stmt.condition, vars)
+            emit_expr(builder, stmt.condition, parent_offsets)
             fmt.sbprintln(builder, "  cmp $0, %eax")
             fmt.sbprintfln(builder, "  je L%v", label)
-            emit_statement(builder, stmt.if_true, vars, function_name)
+            emit_statement(builder, stmt.if_true, parent_offsets, function_name)
             fmt.sbprintfln(builder, "  jmp L%v", label + 1)
             emit_label(builder, label)
-            emit_statement(builder, stmt.if_false, vars, function_name)
+            emit_statement(builder, stmt.if_false, parent_offsets, function_name)
             emit_label(builder, label + 1)
 
         case Goto_Node:
             fmt.sbprintfln(builder, "  jmp _%v", stmt.label)
 
         case Compound_Statement_Node:
+            offsets := make_scoped_variable_offsets(parent_offsets)
             for block_statement in stmt.statements {
-                emit_block_statement(builder, block_statement, vars.children[statement], function_name)
+                emit_block_statement(builder, block_statement, offsets, function_name)
             }
 
         case:
-            emit_expr(builder, statement, vars)
+            emit_expr(builder, statement, parent_offsets)
     }
 }
 
-calculate_offsets :: proc(vars: ^Scoped_Variables, start_offset := 4) -> (end_offset: int) {
-    offset := start_offset
-
-    for var in vars.var_offsets {
-        vars.var_offsets[var] = offset
-        offset += 4
-    }
-
-    for _, child in vars.children {
-        offset = calculate_offsets(child, offset)
-    }
-
-    return offset
+Scoped_Variable_Offsets :: struct {
+    parent: ^Scoped_Variable_Offsets,
+    var_offsets: map[string]int,
 }
 
-emit_function :: proc(builder: ^strings.Builder, function: Function_Node, vars: ^Scoped_Variables) {
+make_scoped_variable_offsets :: proc(parent: ^Scoped_Variable_Offsets) -> ^Scoped_Variable_Offsets {
+    vars := new(Scoped_Variable_Offsets)
+    vars.parent = parent
+    vars.var_offsets = make(map[string]int)
+    return vars
+}
+
+print_scoped_variable_offsets :: proc(vars: ^Scoped_Variable_Offsets, indent := 0) {
+    print_indent(indent)
+    fmt.print("vars=(")
+    if len(vars.var_offsets) != 0 {
+        fmt.println()
+        for var in vars.var_offsets {
+            print_indent(indent + 1)
+            fmt.println(var)
+        }
+        print_indent(indent)
+    }
+    fmt.println(")")
+}
+
+count_function_variable_declarations :: proc(function: Function_Node) -> int {
+    declarations := 0
+
+    for block_statement in function.body {
+        #partial switch stmt in block_statement.variant {
+            case Decl_Node, Decl_Assign_Node:
+                declarations += 1
+
+            case Compound_Statement_Node:
+                declarations += count_compound_statement_variable_declarations(stmt)
+        }
+    }
+
+    return declarations
+}
+
+count_compound_statement_variable_declarations :: proc(compound_statement: Compound_Statement_Node) -> int {
+    declarations := 0
+
+    for block_statement in compound_statement.statements {
+        #partial switch stmt in block_statement.variant {
+            case Decl_Node, Decl_Assign_Node:
+                declarations += 1
+
+            case Compound_Statement_Node:
+                declarations += count_compound_statement_variable_declarations(stmt)
+        }
+    }
+
+    return declarations
+}
+
+emit_function :: proc(builder: ^strings.Builder, function: Function_Node, parent_offsets: ^Scoped_Variable_Offsets) {
+    fmt.println("Emitting function ", function.name)
     labels := validate_and_gather_function_labels(function)
 
     fmt.sbprintfln(builder, ".globl %v", function.name)
@@ -1641,13 +1667,14 @@ emit_function :: proc(builder: ^strings.Builder, function: Function_Node, vars: 
     fmt.sbprintln(builder, "  push %rbp")
     fmt.sbprintln(builder, "  mov %rsp, %rbp")
 
-    rsp_decrement := calculate_offsets(vars) - 4
+    rsp_decrement := count_function_variable_declarations(function) * 4
     if rsp_decrement > 0 {
         fmt.sbprintfln(builder, "  sub $%v, %%rsp", rsp_decrement)
     }
 
+    offsets := make_scoped_variable_offsets(parent_offsets)
     for statement in function.body {
-        emit_block_statement(builder, statement, vars, function.name)
+        emit_block_statement(builder, statement, offsets, function.name)
     }
 
     if function.name == "main" {
@@ -1662,12 +1689,13 @@ emit_function :: proc(builder: ^strings.Builder, function: Function_Node, vars: 
     fmt.sbprintln(builder, "  ret")
 }
 
-emit :: proc(program: Program, vars: ^Scoped_Variables) -> string {
+emit :: proc(program: Program) -> string {
     builder: strings.Builder
+    offsets := make_scoped_variable_offsets(nil) // Global scope has no parent
 
     for node in program.children {
         function := node.variant.(Function_Node)
-        emit_function(&builder, function, vars.children[node])
+        emit_function(&builder, function, offsets)
     }
 
     return strings.to_string(builder)
@@ -1690,16 +1718,7 @@ compile_to_assembly :: proc(source_file: string) -> (asm_file: string) {
         pretty_print_program(program)
     }
 
-    
-    vars := validate_and_gather_variables(program, make(map[string][dynamic]string))
-    when LOG {
-        fmt.println("\n\n------ VARIABLE MAP ------")
-        print_scoped_variables(vars)
-    }
-
-
-
-    assembly := emit(program, vars)
+    assembly := emit(program)
     when LOG {
         fmt.println("\n\n------ ASSEMBLY ------")
         fmt.println(assembly)

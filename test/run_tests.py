@@ -4,12 +4,10 @@ import argparse
 
 import exp_files
 
-def is_case_of(dirpath: str, test_case: str) -> bool:
-    (head, current) = os.path.split(dirpath)
-    parent = os.path.basename(head)
-    return current == test_case or (parent == test_case and current == "extra_credit")
+def is_case_of(dirpath: str, case: str):
+    return f"\\{case}" in dirpath
 
-def do_chapter_tests(dirname: str):
+def do_tests(dirname: str):
     global passed
     global failed
 
@@ -17,7 +15,8 @@ def do_chapter_tests(dirname: str):
         if is_case_of(root, "valid"):
             for file in filter(lambda f: f.endswith(".c"), files):
                 source_path = os.path.join(root, file)
-                print(f"Running test {os.path.join(root, file)}:  ", end = "")
+
+                print(f"Running test {source_path}:  ", end = "")
                 compile_result = subprocess.run(
                         ["../occm.exe", source_path],
                         stdout=subprocess.DEVNULL,
@@ -27,6 +26,7 @@ def do_chapter_tests(dirname: str):
                     print("FAILED! Compilation failed")
                     failed += 1
                     continue
+
                 exec_path = file[:-2] + ".exe"
                 exp_file_path = exp_files.exp_file_path_from_source_path(source_path)
                 exp_file = exp_files.ExpFile(exp_file_path)
@@ -95,9 +95,7 @@ def do_chapter_tests(dirname: str):
 
 def main():
     parser = argparse.ArgumentParser()
-    parser.add_argument("-high")
-    parser.add_argument("-low")
-    parser.add_argument("-only")
+    parser.add_argument("-path")
     parser.add_argument("-norebuild")
     args = parser.parse_args()
 
@@ -113,22 +111,10 @@ def main():
             return
         os.chdir("test")
 
-    if args.only:
-        do_chapter_tests(f"chapter_{args.only}")
+    if args.path:
+        do_tests(args.path)
     else:
-        if args.low:
-            low = int(args.low)
-        else:
-            low = 1
-
-        if args.high:
-            high = int(args.high)
-        else:
-            high = 20
-            
-
-        for i in range(low, high + 1):
-            do_chapter_tests(f"chapter_{i}")
+        do_tests(".")
 
     print(f"Passed: {passed}, Failed: {failed}")
 
