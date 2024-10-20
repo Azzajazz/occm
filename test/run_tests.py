@@ -94,7 +94,7 @@ def do_test(dirname: str, source_path: str):
         do_valid_test(source_path)
 
     elif is_case_of(dirname, "invalid_lex"):
-        do_invalid_parse_test(source_path)
+        do_invalid_lex_test(source_path)
 
     elif is_case_of(dirname, "invalid_parse"):
         do_invalid_parse_test(source_path)
