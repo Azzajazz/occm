@@ -858,11 +858,13 @@ parse_statement :: proc(tokens: []Token, labels: [dynamic]string = nil) -> (^Ast
             result = make_node_4(For_Node, pre_condition, condition, post_condition, if_true)
 
         case .ContinueKeyword:
-            tokens = tokens[1:]
+            token, tokens = take_first_token(tokens[1:])
+            if token.type != .Semicolon do parse_error(token, tokens)
             result = make_node_0(Continue_Node)
 
         case .BreakKeyword:
-            tokens = tokens[1:]
+            token, tokens = take_first_token(tokens[1:])
+            if token.type != .Semicolon do parse_error(token, tokens)
             result = make_node_0(Break_Node)
 
         case .Semicolon:
