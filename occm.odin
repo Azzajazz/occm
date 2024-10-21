@@ -1498,15 +1498,16 @@ emit_statement :: proc(builder: ^strings.Builder, statement: ^Ast_Node, parent_o
 
         case Do_While_Node:
             label := current_label
-            current_label += 2
-            append(&info.loop_labels, Loop_Labels{continue_label = label, break_label = label + 1})
+            current_label += 3
+            append(&info.loop_labels, Loop_Labels{continue_label = label + 1, break_label = label + 2})
             emit_label(builder, label)
             emit_statement(builder, stmt.if_true, parent_offsets, info, function_name)
+            emit_label(builder, label + 1)
             emit_expr(builder, stmt.condition, parent_offsets, info)
             fmt.sbprintln(builder, "  cmp $0, %eax")
-            fmt.sbprintfln(builder, "  je L%v", label + 1)
+            fmt.sbprintfln(builder, "  je L%v", label + 2)
             fmt.sbprintfln(builder, "  jmp L%v", label)
-            emit_label(builder, label + 1)
+            emit_label(builder, label + 2)
             pop(&info.loop_labels)
 
         case For_Node:
