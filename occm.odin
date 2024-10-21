@@ -1486,6 +1486,7 @@ emit_statement :: proc(builder: ^strings.Builder, statement: ^Ast_Node, parent_o
         case While_Node:
             label := current_label
             current_label += 2
+            append(&info.loop_labels, Loop_Labels{continue_label = label, break_label = label + 1})
             emit_label(builder, label)
             emit_expr(builder, stmt.condition, parent_offsets, info)
             fmt.sbprintln(builder, "  cmp $0, %eax")
@@ -1493,10 +1494,12 @@ emit_statement :: proc(builder: ^strings.Builder, statement: ^Ast_Node, parent_o
             emit_statement(builder, stmt.if_true, parent_offsets, info, function_name)
             fmt.sbprintfln(builder, "  jmp L%v", label)
             emit_label(builder, label + 1)
+            pop(&info.loop_labels)
 
         case Do_While_Node:
             label := current_label
             current_label += 2
+            append(&info.loop_labels, Loop_Labels{continue_label = label, break_label = label + 1})
             emit_label(builder, label)
             emit_statement(builder, stmt.if_true, parent_offsets, info, function_name)
             emit_expr(builder, stmt.condition, parent_offsets, info)
@@ -1504,21 +1507,33 @@ emit_statement :: proc(builder: ^strings.Builder, statement: ^Ast_Node, parent_o
             fmt.sbprintfln(builder, "  je L%v", label + 1)
             fmt.sbprintfln(builder, "  jmp L%v", label)
             emit_label(builder, label + 1)
+            pop(&info.loop_labels)
 
         case For_Node:
             label := current_label
-            current_label += 2
+            current_label += 3
+            append(&info.loop_labels, Loop_Labels{continue_label = label + 1, break_label = label + 2})
             emit_block_statement(builder, stmt.pre_condition, parent_offsets, info, function_name)
             emit_label(builder, label)
             emit_expr(builder, stmt.condition, parent_offsets, info)
             fmt.sbprintln(builder, "  cmp $0, %eax")
-            fmt.sbprintfln(builder, "  je L%v", label + 1)
+            fmt.sbprintfln(builder, "  je L%v", label + 2)
             emit_statement(builder, stmt.if_true, parent_offsets, info, function_name)
+            emit_label(builder, label + 1)
             if stmt.post_condition != nil {
                 emit_expr(builder, stmt.post_condition, parent_offsets, info)
             }
             fmt.sbprintfln(builder, "  jmp L%v", label)
-            emit_label(builder, label + 1)
+            emit_label(builder, label + 2)
+            pop(&info.loop_labels)
+
+        case Continue_Node:
+            if len(info.loop_labels) == 0 do semantic_error()
+            fmt.sbprintfln(builder, "  jmp L%v", slice.last(info.loop_labels[:]).continue_label)
+
+        case Break_Node:
+            if len(info.loop_labels) == 0 do semantic_error()
+            fmt.sbprintfln(builder, "  jmp L%v", slice.last(info.loop_labels[:]).break_label)
 
         case Goto_Node:
             fmt.println(info)
