@@ -64,6 +64,8 @@ Ast_Node :: struct {
         While_Node,
         Do_While_Node,
         For_Node,
+        Continue_Node,
+        Break_Node,
     },
 }
 
@@ -174,6 +176,9 @@ For_Node :: struct {
     post_condition: ^Ast_Node,
     if_true: ^Ast_Node,
 }
+
+Continue_Node :: distinct Null_Statement_Node
+Break_Node :: distinct Null_Statement_Node
 
 make_node_0 :: proc($T: typeid) -> ^Ast_Node {
     node := new(Ast_Node)

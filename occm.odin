@@ -58,6 +58,8 @@ Token_Type :: enum {
     WhileKeyword,
     DoKeyword,
     ForKeyword,
+    ContinueKeyword,
+    BreakKeyword,
     Ident,
     IntConstant,
     Semicolon,
@@ -106,6 +108,8 @@ get_keyword_or_ident_token :: proc(input: string) -> (token: Token, rest: string
     else if text == "while" do return Token{.WhileKeyword, text, {}}, input[byte_index:]
     else if text == "do" do return Token{.DoKeyword, text, {}}, input[byte_index:]
     else if text == "for" do return Token{.ForKeyword, text, {}}, input[byte_index:]
+    else if text == "continue" do return Token{.ContinueKeyword, text, {}}, input[byte_index:]
+    else if text == "break" do return Token{.BreakKeyword, text, {}}, input[byte_index:]
     else do return Token{.Ident, text, {}}, input[byte_index:]
 }
 
@@ -831,7 +835,7 @@ parse_statement :: proc(tokens: []Token, labels: [dynamic]string = nil) -> (^Ast
             pre_condition, tokens = parse_block_statement(tokens)
 
             condition: ^Ast_Node = ---
-            token := peek_first_token(tokens)
+            token = peek_first_token(tokens)
             if token.type == .Semicolon {
                 condition = make_node_1(Int_Constant_Node, 1) // If expression is empty, replace it with a condition that is always true
             }
@@ -841,14 +845,25 @@ parse_statement :: proc(tokens: []Token, labels: [dynamic]string = nil) -> (^Ast
             token, tokens = take_first_token(tokens)
             if token.type != .Semicolon do parse_error(token, tokens)
 
-            post_condition: ^Ast_Node = ---
-            post_condition, tokens = parse_expression(tokens)
+            post_condition: ^Ast_Node
+            token = peek_first_token(tokens)
+            if token.type != .RParen {
+                post_condition, tokens = parse_expression(tokens)
+            }
             token, tokens = take_first_token(tokens)
 
             if token.type != .RParen do parse_error(token, tokens)
             if_true: ^Ast_Node = ---
             if_true, tokens = parse_statement(tokens)
             result = make_node_4(For_Node, pre_condition, condition, post_condition, if_true)
+
+        case .ContinueKeyword:
+            tokens = tokens[1:]
+            result = make_node_0(Continue_Node)
+
+        case .BreakKeyword:
+            tokens = tokens[1:]
+            result = make_node_0(Break_Node)
 
         case .Semicolon:
             tokens = tokens[1:]
@@ -1004,6 +1019,16 @@ validate_lvalue :: proc(offsets: ^Scoped_Variable_Offsets, lvalue: ^Ast_Node) {
     if !is_defined(offsets, ident.var_name) do semantic_error()
 }
 
+Loop_Labels :: struct {
+    continue_label: int,
+    break_label: int,
+}
+
+Emit_Info :: struct {
+    labels: []string,
+    loop_labels: [dynamic]Loop_Labels,
+}
+
 current_label := 1
 current_offset := 4
 
@@ -1017,18 +1042,18 @@ emit_label :: proc(builder: ^strings.Builder, label := -1) {
     }
 }
 
-emit_unary_op :: proc(builder: ^strings.Builder, op: ^Ast_Node, offsets: ^Scoped_Variable_Offsets, labels: ^[dynamic]string) {
+emit_unary_op :: proc(builder: ^strings.Builder, op: ^Ast_Node, offsets: ^Scoped_Variable_Offsets, info: ^Emit_Info) {
     #partial switch o in op.variant {
         case Negate_Node:
-            emit_expr(builder, o.expr, offsets, labels)
+            emit_expr(builder, o.expr, offsets, info)
             fmt.sbprintln(builder, "  neg %eax")
 
         case Bit_Negate_Node:
-            emit_expr(builder, o.expr, offsets, labels)
+            emit_expr(builder, o.expr, offsets, info)
             fmt.sbprintln(builder, "  not %eax")
 
         case Boolean_Negate_Node:
-            emit_expr(builder, o.expr, offsets, labels)
+            emit_expr(builder, o.expr, offsets, info)
             fmt.sbprintln(builder, "  cmp $0, %eax")
             fmt.sbprintln(builder, "  mov $0, %eax")
             fmt.sbprintln(builder, "  sete %al")
@@ -1059,34 +1084,34 @@ emit_unary_op :: proc(builder: ^strings.Builder, op: ^Ast_Node, offsets: ^Scoped
     }
 }
 
-emit_binary_op :: proc(builder: ^strings.Builder, op: ^Ast_Node, vars: ^Scoped_Variable_Offsets, labels: ^[dynamic]string) {
+emit_binary_op :: proc(builder: ^strings.Builder, op: ^Ast_Node, vars: ^Scoped_Variable_Offsets, info: ^Emit_Info) {
     #partial switch o in op.variant {
         case Add_Node:
-            emit_expr(builder, o.left, vars, labels)
+            emit_expr(builder, o.left, vars, info)
             fmt.sbprintln(builder, "  push %rax")
-            emit_expr(builder, o.right, vars, labels)
+            emit_expr(builder, o.right, vars, info)
             fmt.sbprintln(builder, "  pop %rbx")
             fmt.sbprintln(builder, "  add %ebx, %eax")
         
         case Subtract_Node:
-            emit_expr(builder, o.left, vars, labels)
+            emit_expr(builder, o.left, vars, info)
             fmt.sbprintln(builder, "  push %rax")
-            emit_expr(builder, o.right, vars, labels)
+            emit_expr(builder, o.right, vars, info)
             fmt.sbprintln(builder, "  pop %rbx")
             fmt.sbprintln(builder, "  sub %eax, %ebx")
             fmt.sbprintln(builder, "  mov %ebx, %eax")
 
         case Multiply_Node:
-            emit_expr(builder, o.left, vars, labels)
+            emit_expr(builder, o.left, vars, info)
             fmt.sbprintln(builder, "  push %rax")
-            emit_expr(builder, o.right, vars, labels)
+            emit_expr(builder, o.right, vars, info)
             fmt.sbprintln(builder, "  pop %rbx")
             fmt.sbprintln(builder, "  imul %ebx")
 
         case Modulo_Node:
-            emit_expr(builder, o.left, vars, labels)
+            emit_expr(builder, o.left, vars, info)
             fmt.sbprintln(builder, "  push %rax")
-            emit_expr(builder, o.right, vars, labels)
+            emit_expr(builder, o.right, vars, info)
             fmt.sbprintln(builder, "  pop %rbx")
             fmt.sbprintln(builder, "  xor %edx, %edx")
             fmt.sbprintln(builder, "  cmp $0, %ebx")
@@ -1099,9 +1124,9 @@ emit_binary_op :: proc(builder: ^strings.Builder, op: ^Ast_Node, vars: ^Scoped_V
             fmt.sbprintln(builder, "  mov %edx, %eax")
 
         case Divide_Node:
-            emit_expr(builder, o.left, vars, labels)
+            emit_expr(builder, o.left, vars, info)
             fmt.sbprintln(builder, "  push %rax")
-            emit_expr(builder, o.right, vars, labels)
+            emit_expr(builder, o.right, vars, info)
             fmt.sbprintln(builder, "  pop %rbx")
             fmt.sbprintln(builder, "  xor %edx, %edx")
             fmt.sbprintln(builder, "  cmp $0, %ebx")
@@ -1113,24 +1138,24 @@ emit_binary_op :: proc(builder: ^strings.Builder, op: ^Ast_Node, vars: ^Scoped_V
             fmt.sbprintln(builder, "  idiv %ecx")
 
         case Boolean_And_Node:
-            emit_expr(builder, o.left, vars, labels)
+            emit_expr(builder, o.left, vars, info)
             fmt.sbprintln(builder, "  cmp $0, %eax")
             label := current_label
             current_label += 1
             fmt.sbprintfln(builder, "  je L%v", label)
-            emit_expr(builder, o.right, vars, labels)
+            emit_expr(builder, o.right, vars, info)
             fmt.sbprintln(builder, "  cmp $0, %eax")
             fmt.sbprintfln(builder, "  je L%v", label)
             fmt.sbprintln(builder, "  mov $1, %eax")
             emit_label(builder, label)
 
         case Boolean_Or_Node:
-            emit_expr(builder, o.left, vars, labels)
+            emit_expr(builder, o.left, vars, info)
             fmt.sbprintln(builder, "  cmp $0, %eax")
             label := current_label
             current_label += 2 
             fmt.sbprintfln(builder, "  jne L%v", label)
-            emit_expr(builder, o.right, vars, labels)
+            emit_expr(builder, o.right, vars, info)
             fmt.sbprintln(builder, "  cmp $0, %eax")
             fmt.sbprintfln(builder, "  je L%v", label + 1)
             emit_label(builder, label)
@@ -1138,94 +1163,94 @@ emit_binary_op :: proc(builder: ^strings.Builder, op: ^Ast_Node, vars: ^Scoped_V
             emit_label(builder, label + 1)
 
         case Boolean_Equal_Node:
-            emit_expr(builder, o.left, vars, labels)
+            emit_expr(builder, o.left, vars, info)
             fmt.sbprintln(builder, "  push %rax")
-            emit_expr(builder, o.right, vars, labels)
+            emit_expr(builder, o.right, vars, info)
             fmt.sbprintln(builder, "  pop %rbx")
             fmt.sbprintln(builder, "  cmp %eax, %ebx")
             fmt.sbprintln(builder, "  mov $0, %eax")
             fmt.sbprintln(builder, "  sete %al")
 
         case Boolean_Not_Equal_Node:
-            emit_expr(builder, o.left, vars, labels)
+            emit_expr(builder, o.left, vars, info)
             fmt.sbprintln(builder, "  push %rax")
-            emit_expr(builder, o.right, vars, labels)
+            emit_expr(builder, o.right, vars, info)
             fmt.sbprintln(builder, "  pop %rbx")
             fmt.sbprintln(builder, "  cmp %eax, %ebx")
             fmt.sbprintln(builder, "  mov $0, %eax")
             fmt.sbprintln(builder, "  setne %al")
 
         case Less_Node:
-            emit_expr(builder, o.left, vars, labels)
+            emit_expr(builder, o.left, vars, info)
             fmt.sbprintln(builder, "  push %rax")
-            emit_expr(builder, o.right, vars, labels)
+            emit_expr(builder, o.right, vars, info)
             fmt.sbprintln(builder, "  pop %rbx")
             fmt.sbprintln(builder, "  cmp %eax, %ebx")
             fmt.sbprintln(builder, "  mov $0, %eax")
             fmt.sbprintln(builder, "  setnge %al")
 
         case Less_Equal_Node:
-            emit_expr(builder, o.left, vars, labels)
+            emit_expr(builder, o.left, vars, info)
             fmt.sbprintln(builder, "  push %rax")
-            emit_expr(builder, o.right, vars, labels)
+            emit_expr(builder, o.right, vars, info)
             fmt.sbprintln(builder, "  pop %rbx")
             fmt.sbprintln(builder, "  cmp %eax, %ebx")
             fmt.sbprintln(builder, "  mov $0, %eax")
             fmt.sbprintln(builder, "  setle %al")
 
         case More_Node:
-            emit_expr(builder, o.left, vars, labels)
+            emit_expr(builder, o.left, vars, info)
             fmt.sbprintln(builder, "  push %rax")
-            emit_expr(builder, o.right, vars, labels)
+            emit_expr(builder, o.right, vars, info)
             fmt.sbprintln(builder, "  pop %rbx")
             fmt.sbprintln(builder, "  cmp %eax, %ebx")
             fmt.sbprintln(builder, "  mov $0, %eax")
             fmt.sbprintln(builder, "  setnle %al")
 
         case More_Equal_Node:
-            emit_expr(builder, o.left, vars, labels)
+            emit_expr(builder, o.left, vars, info)
             fmt.sbprintln(builder, "  push %rax")
-            emit_expr(builder, o.right, vars, labels)
+            emit_expr(builder, o.right, vars, info)
             fmt.sbprintln(builder, "  pop %rbx")
             fmt.sbprintln(builder, "  cmp %eax, %ebx")
             fmt.sbprintln(builder, "  mov $0, %eax")
             fmt.sbprintln(builder, "  setge %al")
 
         case Bit_And_Node:
-            emit_expr(builder, o.left, vars, labels)
+            emit_expr(builder, o.left, vars, info)
             fmt.sbprintln(builder, "  push %rax")
-            emit_expr(builder, o.right, vars, labels)
+            emit_expr(builder, o.right, vars, info)
             fmt.sbprintln(builder, "  pop %rbx")
             fmt.sbprintln(builder, "  and %ebx, %eax")
 
         case Bit_Or_Node:
-            emit_expr(builder, o.left, vars, labels)
+            emit_expr(builder, o.left, vars, info)
             fmt.sbprintln(builder, "  push %rax")
-            emit_expr(builder, o.right, vars, labels)
+            emit_expr(builder, o.right, vars, info)
             fmt.sbprintln(builder, "  pop %rbx")
             fmt.sbprintln(builder, "  or %ebx, %eax")
 
         case Bit_Xor_Node:
-            emit_expr(builder, o.left, vars, labels)
+            emit_expr(builder, o.left, vars, info)
             fmt.sbprintln(builder, "  push %rax")
-            emit_expr(builder, o.right, vars, labels)
+            emit_expr(builder, o.right, vars, info)
             fmt.sbprintln(builder, "  pop %rbx")
             fmt.sbprintln(builder, "  xor %ebx, %eax")
 
         // @TODO: This will need some semantics passes, but we are skipping them for now until we have type checking since a lot of the semantics depends on this
         case Shift_Left_Node:
-            emit_expr(builder, o.left, vars, labels)
+            emit_expr(builder, o.left, vars, info)
             fmt.sbprintln(builder, "  push %rax")
-            emit_expr(builder, o.right, vars, labels)
+            emit_expr(builder, o.right, vars, info)
             fmt.sbprintln(builder, "  pop %rbx")
             fmt.sbprintln(builder, "  mov %eax, %ecx")
             fmt.sbprintln(builder, "  mov %ebx, %eax")
             fmt.sbprintln(builder, "  shl %cl, %eax")
 
         case Shift_Right_Node:
-            emit_expr(builder, o.left, vars, labels)
+            emit_expr(builder, o.left, vars, info)
             fmt.sbprintln(builder, "  push %rax")
-            emit_expr(builder, o.right, vars, labels)
+            emit_expr(builder, o.right, vars, info)
             fmt.sbprintln(builder, "  pop %rbx")
             fmt.sbprintln(builder, "  mov %eax, %ecx")
             fmt.sbprintln(builder, "  mov %ebx, %eax")
@@ -1239,23 +1264,23 @@ emit_binary_op :: proc(builder: ^strings.Builder, op: ^Ast_Node, vars: ^Scoped_V
     }
 }
 
-emit_assign_op :: proc(builder: ^strings.Builder, op: ^Ast_Node, offsets: ^Scoped_Variable_Offsets, labels: ^[dynamic]string) {
+emit_assign_op :: proc(builder: ^strings.Builder, op: ^Ast_Node, offsets: ^Scoped_Variable_Offsets, info: ^Emit_Info) {
     #partial switch o in op.variant {
         case Equal_Node:
             validate_lvalue(offsets, o.left)
-            emit_expr(builder, o.right, offsets, labels)
+            emit_expr(builder, o.right, offsets, info)
             fmt.sbprintfln(builder, "  mov %%eax, -%v(%%rbp)", get_offset(offsets, o.left.variant.(Ident_Node).var_name))
 
         case Plus_Equal_Node:
             validate_lvalue(offsets, o.left)
-            emit_expr(builder, o.right, offsets, labels)
+            emit_expr(builder, o.right, offsets, info)
             fmt.sbprintfln(builder, "  mov -%v(%%rbp), %%ebx", get_offset(offsets, o.left.variant.(Ident_Node).var_name))
             fmt.sbprintln(builder, "  add %ebx, %eax")
             fmt.sbprintfln(builder, "  mov %%eax, -%v(%%rbp)", get_offset(offsets, o.left.variant.(Ident_Node).var_name))
             
         case Minus_Equal_Node:
             validate_lvalue(offsets, o.left)
-            emit_expr(builder, o.right, offsets, labels)
+            emit_expr(builder, o.right, offsets, info)
             fmt.sbprintln(builder, "  mov %eax, %ebx")
             fmt.sbprintfln(builder, "  mov -%v(%%rbp), %%eax", get_offset(offsets, o.left.variant.(Ident_Node).var_name))
             fmt.sbprintln(builder, "  sub %ebx, %eax")
@@ -1263,14 +1288,14 @@ emit_assign_op :: proc(builder: ^strings.Builder, op: ^Ast_Node, offsets: ^Scope
 
         case Times_Equal_Node:
             validate_lvalue(offsets, o.left)
-            emit_expr(builder, o.right, offsets, labels)
+            emit_expr(builder, o.right, offsets, info)
             fmt.sbprintfln(builder, "  mov -%v(%%rbp), %%ebx", get_offset(offsets, o.left.variant.(Ident_Node).var_name))
             fmt.sbprintln(builder, "  imul %ebx, %eax")
             fmt.sbprintfln(builder, "  mov %%eax, -%v(%%rbp)", get_offset(offsets, o.left.variant.(Ident_Node).var_name))
 
         case Divide_Equal_Node:
             validate_lvalue(offsets, o.left)
-            emit_expr(builder, o.right, offsets, labels)
+            emit_expr(builder, o.right, offsets, info)
             fmt.sbprintln(builder, "  mov %eax, %ebx")
             fmt.sbprintfln(builder, "  mov -%v(%%rbp), %%eax", get_offset(offsets, o.left.variant.(Ident_Node).var_name))
             fmt.sbprintln(builder, "  xor %edx, %edx")
@@ -1283,7 +1308,7 @@ emit_assign_op :: proc(builder: ^strings.Builder, op: ^Ast_Node, offsets: ^Scope
 
         case Modulo_Equal_Node:
             validate_lvalue(offsets, o.left)
-            emit_expr(builder, o.right, offsets, labels)
+            emit_expr(builder, o.right, offsets, info)
             fmt.sbprintln(builder, "  mov %eax, %ebx")
             fmt.sbprintfln(builder, "  mov -%v(%%rbp), %%eax", get_offset(offsets, o.left.variant.(Ident_Node).var_name))
             fmt.sbprintln(builder, "  xor %edx, %edx")
@@ -1297,28 +1322,28 @@ emit_assign_op :: proc(builder: ^strings.Builder, op: ^Ast_Node, offsets: ^Scope
 
         case Xor_Equal_Node:
             validate_lvalue(offsets, o.left)
-            emit_expr(builder, o.right, offsets, labels)
+            emit_expr(builder, o.right, offsets, info)
             fmt.sbprintfln(builder, "  mov -%v(%%rbp), %%ebx", get_offset(offsets, o.left.variant.(Ident_Node).var_name))
             fmt.sbprintln(builder, "  xor %ebx, %eax")
             fmt.sbprintfln(builder, "  mov %%eax, -%v(%%rbp)", get_offset(offsets, o.left.variant.(Ident_Node).var_name))
 
         case Or_Equal_Node:
             validate_lvalue(offsets, o.left)
-            emit_expr(builder, o.right, offsets, labels)
+            emit_expr(builder, o.right, offsets, info)
             fmt.sbprintfln(builder, "  mov -%v(%%rbp), %%ebx", get_offset(offsets, o.left.variant.(Ident_Node).var_name))
             fmt.sbprintln(builder, "  or %ebx, %eax")
             fmt.sbprintfln(builder, "  mov %%eax, -%v(%%rbp)", get_offset(offsets, o.left.variant.(Ident_Node).var_name))
 
         case And_Equal_Node:
             validate_lvalue(offsets, o.left)
-            emit_expr(builder, o.right, offsets, labels)
+            emit_expr(builder, o.right, offsets, info)
             fmt.sbprintfln(builder, "  mov -%v(%%rbp), %%ebx", get_offset(offsets, o.left.variant.(Ident_Node).var_name))
             fmt.sbprintln(builder, "  and %ebx, %eax")
             fmt.sbprintfln(builder, "  mov %%eax, -%v(%%rbp)", get_offset(offsets, o.left.variant.(Ident_Node).var_name))
 
         case Shift_Left_Equal_Node:
             validate_lvalue(offsets, o.left)
-            emit_expr(builder, o.right, offsets, labels)
+            emit_expr(builder, o.right, offsets, info)
             fmt.sbprintln(builder, "  mov %eax, %ecx")
             fmt.sbprintfln(builder, "  mov -%v(%%rbp), %%eax", get_offset(offsets, o.left.variant.(Ident_Node).var_name))
             fmt.sbprintln(builder, "  shl %cl, %eax")
@@ -1326,7 +1351,7 @@ emit_assign_op :: proc(builder: ^strings.Builder, op: ^Ast_Node, offsets: ^Scope
 
         case Shift_Right_Equal_Node:
             validate_lvalue(offsets, o.left)
-            emit_expr(builder, o.right, offsets, labels)
+            emit_expr(builder, o.right, offsets, info)
             fmt.sbprintln(builder, "  mov %eax, %ecx")
             fmt.sbprintfln(builder, "  mov -%v(%%rbp), %%eax", get_offset(offsets, o.left.variant.(Ident_Node).var_name))
             fmt.sbprintln(builder, "  shr %cl, %eax")
@@ -1338,7 +1363,7 @@ emit_assign_op :: proc(builder: ^strings.Builder, op: ^Ast_Node, offsets: ^Scope
     }
 }
 
-emit_expr :: proc(builder: ^strings.Builder, expr: ^Ast_Node, vars: ^Scoped_Variable_Offsets, labels: ^[dynamic]string) {
+emit_expr :: proc(builder: ^strings.Builder, expr: ^Ast_Node, vars: ^Scoped_Variable_Offsets, info: ^Emit_Info) {
     #partial switch e in expr.variant {
         case Int_Constant_Node:
             fmt.sbprintfln(builder, "  mov $%v, %%eax", e.value)
@@ -1347,56 +1372,56 @@ emit_expr :: proc(builder: ^strings.Builder, expr: ^Ast_Node, vars: ^Scoped_Vari
             if !is_defined(vars, e.var_name) do semantic_error()
             fmt.sbprintfln(builder, "  mov -%v(%%rbp), %%eax", get_offset(vars, e.var_name))
 
-        case Negate_Node: emit_unary_op(builder, expr, vars, labels)
-        case Bit_Negate_Node: emit_unary_op(builder, expr, vars, labels)
-        case Boolean_Negate_Node: emit_unary_op(builder, expr, vars, labels)
-        case Pre_Decrement_Node: emit_unary_op(builder, expr, vars, labels)
-        case Pre_Increment_Node: emit_unary_op(builder, expr, vars, labels)
-        case Post_Decrement_Node: emit_unary_op(builder, expr, vars, labels)
-        case Post_Increment_Node: emit_unary_op(builder, expr, vars, labels)
+        case Negate_Node: emit_unary_op(builder, expr, vars, info)
+        case Bit_Negate_Node: emit_unary_op(builder, expr, vars, info)
+        case Boolean_Negate_Node: emit_unary_op(builder, expr, vars, info)
+        case Pre_Decrement_Node: emit_unary_op(builder, expr, vars, info)
+        case Pre_Increment_Node: emit_unary_op(builder, expr, vars, info)
+        case Post_Decrement_Node: emit_unary_op(builder, expr, vars, info)
+        case Post_Increment_Node: emit_unary_op(builder, expr, vars, info)
             
 
-        case Add_Node: emit_binary_op(builder, expr, vars, labels)
-        case Subtract_Node: emit_binary_op(builder, expr, vars, labels)
-        case Multiply_Node: emit_binary_op(builder, expr, vars, labels)
-        case Modulo_Node: emit_binary_op(builder, expr, vars, labels)
-        case Divide_Node: emit_binary_op(builder, expr, vars, labels)
-        case Boolean_And_Node: emit_binary_op(builder, expr, vars, labels)
-        case Boolean_Or_Node: emit_binary_op(builder, expr, vars, labels)
-        case Boolean_Equal_Node: emit_binary_op(builder, expr, vars, labels)
-        case Boolean_Not_Equal_Node: emit_binary_op(builder, expr, vars, labels)
-        case Less_Node: emit_binary_op(builder, expr, vars, labels)
-        case Less_Equal_Node: emit_binary_op(builder, expr, vars, labels)
-        case More_Node: emit_binary_op(builder, expr, vars, labels)
-        case More_Equal_Node: emit_binary_op(builder, expr, vars, labels)
-        case Bit_And_Node: emit_binary_op(builder, expr, vars, labels)
-        case Bit_Or_Node: emit_binary_op(builder, expr, vars, labels)
-        case Bit_Xor_Node: emit_binary_op(builder, expr, vars, labels)
-        case Shift_Left_Node: emit_binary_op(builder, expr, vars, labels)
-        case Shift_Right_Node: emit_binary_op(builder, expr, vars, labels)
+        case Add_Node: emit_binary_op(builder, expr, vars, info)
+        case Subtract_Node: emit_binary_op(builder, expr, vars, info)
+        case Multiply_Node: emit_binary_op(builder, expr, vars, info)
+        case Modulo_Node: emit_binary_op(builder, expr, vars, info)
+        case Divide_Node: emit_binary_op(builder, expr, vars, info)
+        case Boolean_And_Node: emit_binary_op(builder, expr, vars, info)
+        case Boolean_Or_Node: emit_binary_op(builder, expr, vars, info)
+        case Boolean_Equal_Node: emit_binary_op(builder, expr, vars, info)
+        case Boolean_Not_Equal_Node: emit_binary_op(builder, expr, vars, info)
+        case Less_Node: emit_binary_op(builder, expr, vars, info)
+        case Less_Equal_Node: emit_binary_op(builder, expr, vars, info)
+        case More_Node: emit_binary_op(builder, expr, vars, info)
+        case More_Equal_Node: emit_binary_op(builder, expr, vars, info)
+        case Bit_And_Node: emit_binary_op(builder, expr, vars, info)
+        case Bit_Or_Node: emit_binary_op(builder, expr, vars, info)
+        case Bit_Xor_Node: emit_binary_op(builder, expr, vars, info)
+        case Shift_Left_Node: emit_binary_op(builder, expr, vars, info)
+        case Shift_Right_Node: emit_binary_op(builder, expr, vars, info)
 
-        case Equal_Node: emit_assign_op(builder, expr, vars, labels)
-        case Plus_Equal_Node: emit_assign_op(builder, expr, vars, labels)
-        case Minus_Equal_Node: emit_assign_op(builder, expr, vars, labels)
-        case Times_Equal_Node: emit_assign_op(builder, expr, vars, labels)
-        case Divide_Equal_Node: emit_assign_op(builder, expr, vars, labels)
-        case Modulo_Equal_Node: emit_assign_op(builder, expr, vars, labels)
-        case Xor_Equal_Node: emit_assign_op(builder, expr, vars, labels)
-        case Or_Equal_Node: emit_assign_op(builder, expr, vars, labels)
-        case And_Equal_Node: emit_assign_op(builder, expr, vars, labels)
-        case Shift_Left_Equal_Node: emit_assign_op(builder, expr, vars, labels)
-        case Shift_Right_Equal_Node: emit_assign_op(builder, expr, vars, labels)
+        case Equal_Node: emit_assign_op(builder, expr, vars, info)
+        case Plus_Equal_Node: emit_assign_op(builder, expr, vars, info)
+        case Minus_Equal_Node: emit_assign_op(builder, expr, vars, info)
+        case Times_Equal_Node: emit_assign_op(builder, expr, vars, info)
+        case Divide_Equal_Node: emit_assign_op(builder, expr, vars, info)
+        case Modulo_Equal_Node: emit_assign_op(builder, expr, vars, info)
+        case Xor_Equal_Node: emit_assign_op(builder, expr, vars, info)
+        case Or_Equal_Node: emit_assign_op(builder, expr, vars, info)
+        case And_Equal_Node: emit_assign_op(builder, expr, vars, info)
+        case Shift_Left_Equal_Node: emit_assign_op(builder, expr, vars, info)
+        case Shift_Right_Equal_Node: emit_assign_op(builder, expr, vars, info)
 
         case Ternary_Node:
             label := current_label
             current_label += 2
-            emit_expr(builder, e.condition, vars, labels)
+            emit_expr(builder, e.condition, vars, info)
             fmt.sbprintln(builder, "  cmp $0, %eax")
             fmt.sbprintfln(builder, "  je L%v", label)
-            emit_expr(builder, e.if_true, vars, labels)
+            emit_expr(builder, e.if_true, vars, info)
             fmt.sbprintfln(builder, "  jmp L%v", label + 1)
             emit_label(builder, label)
-            emit_expr(builder, e.if_false, vars, labels)
+            emit_expr(builder, e.if_false, vars, info)
             emit_label(builder, label + 1)
 
         case:
@@ -1405,13 +1430,13 @@ emit_expr :: proc(builder: ^strings.Builder, expr: ^Ast_Node, vars: ^Scoped_Vari
     }
 }
 
-emit_block_statement :: proc(builder: ^strings.Builder, block_statement: ^Ast_Node, offsets: ^Scoped_Variable_Offsets, labels: ^[dynamic]string, function_name: string) {
+emit_block_statement :: proc(builder: ^strings.Builder, block_statement: ^Ast_Node, offsets: ^Scoped_Variable_Offsets, info: ^Emit_Info, function_name: string) {
     #partial switch stmt in block_statement.variant {
         case Decl_Assign_Node:
             if stmt.var_name in offsets.var_offsets do semantic_error()
             offsets.var_offsets[stmt.var_name] = current_offset
             current_offset += 4
-            emit_expr(builder, stmt.right, offsets, labels)
+            emit_expr(builder, stmt.right, offsets, info)
             fmt.sbprintfln(builder, "  mov %%eax, -%v(%%rbp)", get_offset(offsets, stmt.var_name))
 
         case Decl_Node: // Space on the stack is already allocated by emit_function
@@ -1420,12 +1445,12 @@ emit_block_statement :: proc(builder: ^strings.Builder, block_statement: ^Ast_No
             current_offset += 4
 
         case:
-            emit_statement(builder, block_statement, offsets, labels, function_name)
+            emit_statement(builder, block_statement, offsets, info, function_name)
     }
 
 }
 
-emit_statement :: proc(builder: ^strings.Builder, statement: ^Ast_Node, parent_offsets: ^Scoped_Variable_Offsets, labels: ^[dynamic]string, function_name: string) {
+emit_statement :: proc(builder: ^strings.Builder, statement: ^Ast_Node, parent_offsets: ^Scoped_Variable_Offsets, info: ^Emit_Info, function_name: string) {
     for label in statement.labels {
         fmt.sbprintfln(builder, "_%v:", label)
     }
@@ -1434,38 +1459,38 @@ emit_statement :: proc(builder: ^strings.Builder, statement: ^Ast_Node, parent_o
         case Null_Statement_Node: // Do nothing
 
         case Return_Node:
-            emit_expr(builder, stmt.expr, parent_offsets, labels)
+            emit_expr(builder, stmt.expr, parent_offsets, info)
             fmt.sbprintfln(builder, "  jmp %v_done", function_name)
 
         case If_Node:
             label := current_label
             current_label += 1
-            emit_expr(builder, stmt.condition, parent_offsets, labels)
+            emit_expr(builder, stmt.condition, parent_offsets, info)
             fmt.sbprintln(builder, "  cmp $0, %eax")
             fmt.sbprintfln(builder, "  je L%v", label)
-            emit_statement(builder, stmt.if_true, parent_offsets, labels, function_name)
+            emit_statement(builder, stmt.if_true, parent_offsets, info, function_name)
             emit_label(builder, label)
 
         case If_Else_Node:
             label := current_label
             current_label += 2
-            emit_expr(builder, stmt.condition, parent_offsets, labels)
+            emit_expr(builder, stmt.condition, parent_offsets, info)
             fmt.sbprintln(builder, "  cmp $0, %eax")
             fmt.sbprintfln(builder, "  je L%v", label)
-            emit_statement(builder, stmt.if_true, parent_offsets, labels, function_name)
+            emit_statement(builder, stmt.if_true, parent_offsets, info, function_name)
             fmt.sbprintfln(builder, "  jmp L%v", label + 1)
             emit_label(builder, label)
-            emit_statement(builder, stmt.if_false, parent_offsets, labels, function_name)
+            emit_statement(builder, stmt.if_false, parent_offsets, info, function_name)
             emit_label(builder, label + 1)
 
         case While_Node:
             label := current_label
             current_label += 2
             emit_label(builder, label)
-            emit_expr(builder, stmt.condition, parent_offsets, labels)
+            emit_expr(builder, stmt.condition, parent_offsets, info)
             fmt.sbprintln(builder, "  cmp $0, %eax")
             fmt.sbprintfln(builder, "  je L%v", label + 1)
-            emit_statement(builder, stmt.if_true, parent_offsets, labels, function_name)
+            emit_statement(builder, stmt.if_true, parent_offsets, info, function_name)
             fmt.sbprintfln(builder, "  jmp L%v", label)
             emit_label(builder, label + 1)
 
@@ -1473,8 +1498,8 @@ emit_statement :: proc(builder: ^strings.Builder, statement: ^Ast_Node, parent_o
             label := current_label
             current_label += 2
             emit_label(builder, label)
-            emit_statement(builder, stmt.if_true, parent_offsets, labels, function_name)
-            emit_expr(builder, stmt.condition, parent_offsets, labels)
+            emit_statement(builder, stmt.if_true, parent_offsets, info, function_name)
+            emit_expr(builder, stmt.condition, parent_offsets, info)
             fmt.sbprintln(builder, "  cmp $0, %eax")
             fmt.sbprintfln(builder, "  je L%v", label + 1)
             fmt.sbprintfln(builder, "  jmp L%v", label)
@@ -1483,29 +1508,31 @@ emit_statement :: proc(builder: ^strings.Builder, statement: ^Ast_Node, parent_o
         case For_Node:
             label := current_label
             current_label += 2
-            emit_block_statement(builder, stmt.pre_condition, parent_offsets, labels, function_name)
+            emit_block_statement(builder, stmt.pre_condition, parent_offsets, info, function_name)
             emit_label(builder, label)
-            emit_expr(builder, stmt.condition, parent_offsets, labels)
+            emit_expr(builder, stmt.condition, parent_offsets, info)
             fmt.sbprintln(builder, "  cmp $0, %eax")
             fmt.sbprintfln(builder, "  je L%v", label + 1)
-            emit_statement(builder, stmt.if_true, parent_offsets, labels, function_name)
-            emit_expr(builder, stmt.post_condition, parent_offsets, labels)
+            emit_statement(builder, stmt.if_true, parent_offsets, info, function_name)
+            if stmt.post_condition != nil {
+                emit_expr(builder, stmt.post_condition, parent_offsets, info)
+            }
             fmt.sbprintfln(builder, "  jmp L%v", label)
             emit_label(builder, label + 1)
 
         case Goto_Node:
-            fmt.println(labels)
-            if !contains(stmt.label, labels[:]) do semantic_error()
+            fmt.println(info)
+            if !contains(stmt.label, info.labels) do semantic_error()
             fmt.sbprintfln(builder, "  jmp _%v", stmt.label)
 
         case Compound_Statement_Node:
             offsets := make_scoped_variable_offsets(parent_offsets)
             for block_statement in stmt.statements {
-                emit_block_statement(builder, block_statement, offsets, labels, function_name)
+                emit_block_statement(builder, block_statement, offsets, info, function_name)
             }
 
         case:
-            emit_expr(builder, statement, parent_offsets, labels)
+            emit_expr(builder, statement, parent_offsets, info)
     }
 }
 
@@ -1583,6 +1610,7 @@ count_block_statement_variable_declarations :: proc(block_statement: ^Ast_Node) 
 
 emit_function :: proc(builder: ^strings.Builder, function: Function_Node, parent_offsets: ^Scoped_Variable_Offsets) {
     labels := validate_and_gather_function_labels(function)
+    info := Emit_Info{labels[:], make([dynamic]Loop_Labels)}
 
     fmt.sbprintfln(builder, ".globl %v", function.name)
     fmt.sbprintfln(builder, "%v:", function.name)
@@ -1596,7 +1624,7 @@ emit_function :: proc(builder: ^strings.Builder, function: Function_Node, parent
 
     offsets := make_scoped_variable_offsets(parent_offsets)
     for statement in function.body {
-        emit_block_statement(builder, statement, offsets, &labels, function.name)
+        emit_block_statement(builder, statement, offsets, &info, function.name)
     }
 
     if function.name == "main" {
