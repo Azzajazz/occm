@@ -60,6 +60,8 @@ Token_Type :: enum {
     ForKeyword,
     ContinueKeyword,
     BreakKeyword,
+    SwitchKeyword,
+    CaseKeyword,
     Ident,
     IntConstant,
     Semicolon,
@@ -110,6 +112,8 @@ get_keyword_or_ident_token :: proc(input: string) -> (token: Token, rest: string
     else if text == "for" do return Token{.ForKeyword, text, {}}, input[byte_index:]
     else if text == "continue" do return Token{.ContinueKeyword, text, {}}, input[byte_index:]
     else if text == "break" do return Token{.BreakKeyword, text, {}}, input[byte_index:]
+    else if text == "switch" do return Token{.SwitchKeyword, text, {}}, input[byte_index:]
+    else if text == "case" do return Token{.CaseKeyword, text, {}}, input[byte_index:]
     else do return Token{.Ident, text, {}}, input[byte_index:]
 }
 
@@ -701,13 +705,25 @@ parse_expression :: proc(tokens: []Token, min_prec := 0) -> (^Ast_Node, []Token)
     return leaf, tokens
 }
 
-parse_labels :: proc(tokens: []Token) -> ([dynamic]string, []Token) {
+parse_labels :: proc(tokens: []Token) -> ([dynamic]Label, []Token) {
     tokens := tokens
-    labels := make([dynamic]string)
+    labels := make([dynamic]Label)
 
-    for token := peek_first_token(tokens); token.type == .Ident && tokens[1].type == .Colon; token = peek_first_token(tokens) {
-        append(&labels, token.text)
-        tokens = tokens[2:]
+    for {
+        token := peek_first_token(tokens)
+        if token.type == .CaseKeyword {
+            token, tokens = take_first_token(tokens[1:])
+            if token.type != .IntConstant do parse_error(token, tokens)
+            constant := make_node_1(Int_Constant_Node, token.data.(int))
+            token, tokens = take_first_token(tokens)
+            if token.type != .Colon do parse_error(token, tokens)
+            append(&labels, constant)
+        }
+        else if token.type == .Ident && tokens[1].type == .Colon {
+            tokens = tokens[2:]        
+            append(&labels, token.text)
+        }
+        else do break
     }
 
     return labels, tokens
@@ -749,7 +765,7 @@ parse_block_statement :: proc(tokens: []Token) -> (^Ast_Node, []Token) {
     panic("Unreachable")
 }
 
-parse_statement :: proc(tokens: []Token, labels: [dynamic]string = nil) -> (^Ast_Node, []Token) {
+parse_statement :: proc(tokens: []Token, labels: [dynamic]Label = nil) -> (^Ast_Node, []Token) {
     tokens := tokens
     labels := labels
     if labels == nil {
@@ -867,6 +883,17 @@ parse_statement :: proc(tokens: []Token, labels: [dynamic]string = nil) -> (^Ast
             if token.type != .Semicolon do parse_error(token, tokens)
             result = make_node_0(Break_Node)
 
+        case .SwitchKeyword:
+            token, tokens = take_first_token(tokens[1:])
+            if token.type != .LParen do parse_error(token, tokens)
+            expr: ^Ast_Node = ---
+            expr, tokens = parse_expression(tokens)
+            token, tokens = take_first_token(tokens)
+            if token.type != .RParen do parse_error(token, tokens)
+            block: ^Ast_Node = ---
+            block, tokens = parse_statement(tokens)
+            result = make_node_2(Switch_Node, expr, block)
+
         case .Semicolon:
             tokens = tokens[1:]
             result = make_node_0(Null_Statement_Node)
@@ -963,7 +990,7 @@ semantic_error :: proc(location := #caller_location) {
     os.exit(4)
 }
 
-validate_and_gather_block_statement_labels :: proc(block_statement: ^Ast_Node, labels: ^[dynamic]string) {
+validate_and_gather_block_statement_labels :: proc(block_statement: ^Ast_Node, labels: ^[dynamic]Label) {
     for label in block_statement.labels {
         if contains(label, labels[:]) do semantic_error()
         append(labels, label)
@@ -984,8 +1011,8 @@ validate_and_gather_block_statement_labels :: proc(block_statement: ^Ast_Node, l
     }
 }
 
-validate_and_gather_function_labels :: proc(function: Function_Node) -> [dynamic]string {
-    labels := make([dynamic]string)
+validate_and_gather_function_labels :: proc(function: Function_Node) -> [dynamic]Label {
+    labels := make([dynamic]Label)
 
     for block_statement in function.body {
         validate_and_gather_block_statement_labels(block_statement, &labels)
@@ -1027,7 +1054,7 @@ Loop_Labels :: struct {
 }
 
 Emit_Info :: struct {
-    labels: []string,
+    labels: []Label,
     loop_labels: [dynamic]Loop_Labels,
 }
 
@@ -1542,7 +1569,7 @@ emit_statement :: proc(builder: ^strings.Builder, statement: ^Ast_Node, parent_o
 
         case Goto_Node:
             fmt.println(info)
-            if !contains(stmt.label, info.labels) do semantic_error()
+            if !contains(cast(Label)stmt.label, info.labels) do semantic_error()
             fmt.sbprintfln(builder, "  jmp _%v", stmt.label)
 
         case Compound_Statement_Node:

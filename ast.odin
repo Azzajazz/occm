@@ -8,8 +8,13 @@ Program :: struct {
     children: [dynamic]^Ast_Node,
 }
 
+Label :: union {
+    string,
+    ^Ast_Node,
+}
+
 Ast_Node :: struct {
-    labels: [dynamic]string,
+    labels: [dynamic]Label,
 
     // Common stuff would go here
     variant: union {
@@ -66,6 +71,7 @@ Ast_Node :: struct {
         For_Node,
         Continue_Node,
         Break_Node,
+        Switch_Node,
     },
 }
 
@@ -180,6 +186,11 @@ For_Node :: struct {
 Continue_Node :: distinct Null_Statement_Node
 Break_Node :: distinct Null_Statement_Node
 
+Switch_Node :: struct {
+    expr: ^Ast_Node,
+    block: ^Ast_Node,
+}
+
 make_node_0 :: proc($T: typeid) -> ^Ast_Node {
     node := new(Ast_Node)
     node.variant = T{}
@@ -220,6 +231,15 @@ print_indent :: proc(indent: int) {
 
 pretty_print_node :: proc(node: Ast_Node, indent := 0) {
     print_indent(indent)
+
+    for label in node.labels {
+        switch l in label {
+            case string:
+                fmt.printf("%v: ", l)
+            case ^Ast_Node:
+                fmt.printf("case %v: ", l.variant.(Int_Constant_Node).value)
+        }
+    }
 
     node_struct_id := reflect.union_variant_typeid(node.variant)
     node_struct_info := type_info_of(node_struct_id).variant.(runtime.Type_Info_Named)
