@@ -1056,10 +1056,10 @@ Loop_Labels :: struct {
 Emit_Info :: struct {
     labels: []Label,
     loop_labels: [dynamic]Loop_Labels,
+    rbp_offset: int,
 }
 
 current_label := 1
-current_offset := 4
 
 emit_label :: proc(builder: ^strings.Builder, label := -1) {
     if label == -1 {
@@ -1463,15 +1463,15 @@ emit_block_statement :: proc(builder: ^strings.Builder, block_statement: ^Ast_No
     #partial switch stmt in block_statement.variant {
         case Decl_Assign_Node:
             if stmt.var_name in offsets.var_offsets do semantic_error()
-            offsets.var_offsets[stmt.var_name] = current_offset
-            current_offset += 4
+            offsets.var_offsets[stmt.var_name] = info.rbp_offset
+            info.rbp_offset += 4
             emit_expr(builder, stmt.right, offsets, info)
             fmt.sbprintfln(builder, "  mov %%eax, -%v(%%rbp)", get_offset(offsets, stmt.var_name))
 
         case Decl_Node: // Space on the stack is already allocated by emit_function
             if stmt.var_name in offsets.var_offsets do semantic_error()
-            offsets.var_offsets[stmt.var_name] = current_offset
-            current_offset += 4
+            offsets.var_offsets[stmt.var_name] = info.rbp_offset
+            info.rbp_offset += 4
 
         case:
             emit_statement(builder, block_statement, offsets, info, function_name)
@@ -1572,6 +1572,9 @@ emit_statement :: proc(builder: ^strings.Builder, statement: ^Ast_Node, parent_o
             if !contains(cast(Label)stmt.label, info.labels) do semantic_error()
             fmt.sbprintfln(builder, "  jmp _%v", stmt.label)
 
+        case Switch_Node:
+            
+
         case Compound_Statement_Node:
             offsets := make_scoped_variable_offsets(parent_offsets)
             for block_statement in stmt.statements {
@@ -1657,7 +1660,7 @@ count_block_statement_variable_declarations :: proc(block_statement: ^Ast_Node) 
 
 emit_function :: proc(builder: ^strings.Builder, function: Function_Node, parent_offsets: ^Scoped_Variable_Offsets) {
     labels := validate_and_gather_function_labels(function)
-    info := Emit_Info{labels[:], make([dynamic]Loop_Labels)}
+    info := Emit_Info{labels[:], make([dynamic]Loop_Labels), 4}
 
     fmt.sbprintfln(builder, ".globl %v", function.name)
     fmt.sbprintfln(builder, "%v:", function.name)
