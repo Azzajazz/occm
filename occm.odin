@@ -714,7 +714,7 @@ parse_labels :: proc(tokens: []Token) -> ([dynamic]Label, []Token) {
         if token.type == .CaseKeyword {
             token, tokens = take_first_token(tokens[1:])
             if token.type != .IntConstant do parse_error(token, tokens)
-            constant := make_node_1(Int_Constant_Node, token.data.(int))
+            constant := token.data.(int)
             token, tokens = take_first_token(tokens)
             if token.type != .Colon do parse_error(token, tokens)
             append(&labels, constant)
@@ -1053,10 +1053,18 @@ Loop_Labels :: struct {
     break_label: int,
 }
 
+Switch_Info :: struct {
+    expr_offset: int,
+    label_count: int,
+    current_label: int,
+}
+
 Emit_Info :: struct {
     labels: []Label,
     loop_labels: [dynamic]Loop_Labels,
-    rbp_offset: int,
+    variable_offset: int, // Offset of previously allocated stack variables
+    rbp_offset: int, // Actual offset from rbp
+    switch_infos: [dynamic]Switch_Info,
 }
 
 current_label := 1
@@ -1463,15 +1471,15 @@ emit_block_statement :: proc(builder: ^strings.Builder, block_statement: ^Ast_No
     #partial switch stmt in block_statement.variant {
         case Decl_Assign_Node:
             if stmt.var_name in offsets.var_offsets do semantic_error()
-            offsets.var_offsets[stmt.var_name] = info.rbp_offset
-            info.rbp_offset += 4
+            offsets.var_offsets[stmt.var_name] = info.variable_offset
+            info.variable_offset += 4
             emit_expr(builder, stmt.right, offsets, info)
             fmt.sbprintfln(builder, "  mov %%eax, -%v(%%rbp)", get_offset(offsets, stmt.var_name))
 
         case Decl_Node: // Space on the stack is already allocated by emit_function
             if stmt.var_name in offsets.var_offsets do semantic_error()
-            offsets.var_offsets[stmt.var_name] = info.rbp_offset
-            info.rbp_offset += 4
+            offsets.var_offsets[stmt.var_name] = info.variable_offset
+            info.variable_offset += 4
 
         case:
             emit_statement(builder, block_statement, offsets, info, function_name)
@@ -1481,7 +1489,18 @@ emit_block_statement :: proc(builder: ^strings.Builder, block_statement: ^Ast_No
 
 emit_statement :: proc(builder: ^strings.Builder, statement: ^Ast_Node, parent_offsets: ^Scoped_Variable_Offsets, info: ^Emit_Info, function_name: string) {
     for label in statement.labels {
-        fmt.sbprintfln(builder, "_%v:", label)
+        switch l in label {
+            case string:
+                fmt.sbprintfln(builder, "_%v:", l)
+            case int:
+                if len(info.switch_infos) == 0 do semantic_error()
+                switch_info := slice.last_ptr(info.switch_infos[:])
+                emit_label(builder, switch_info.current_label)
+                switch_info.current_label += 1
+                fmt.sbprintfln(builder, "  mov -%v(%%rbp), %%eax", switch_info.expr_offset)
+                fmt.sbprintfln(builder, "  cmp $%v, %%eax", l)
+                fmt.sbprintfln(builder, "  jne L%v", switch_info.current_label)
+        }
     }
 
     #partial switch stmt in statement.variant {
@@ -1573,7 +1592,17 @@ emit_statement :: proc(builder: ^strings.Builder, statement: ^Ast_Node, parent_o
             fmt.sbprintfln(builder, "  jmp _%v", stmt.label)
 
         case Switch_Node:
-            
+            emit_expr(builder, stmt.expr, parent_offsets, info)
+            fmt.sbprintln(builder, "  push %rax")
+            info.rbp_offset += 8
+            switch_info := get_switch_info(stmt, info)
+            append(&info.switch_infos, switch_info) 
+            current_label += switch_info.label_count
+            emit_statement(builder, stmt.block, parent_offsets, info, function_name)
+            emit_label(builder, slice.last(info.switch_infos[:]).current_label)
+            fmt.sbprintln(builder, "  pop %rax")
+            pop(&info.switch_infos)
+            info.rbp_offset -= 8
 
         case Compound_Statement_Node:
             offsets := make_scoped_variable_offsets(parent_offsets)
@@ -1648,6 +1677,8 @@ count_block_statement_variable_declarations :: proc(block_statement: ^Ast_Node) 
                     declarations += 1
             }
             declarations += count_block_statement_variable_declarations(stmt.if_true)            
+        case Switch_Node:
+            declarations += count_block_statement_variable_declarations(stmt.block)
 
         case Compound_Statement_Node:
             for statement in stmt.statements {
@@ -1658,18 +1689,67 @@ count_block_statement_variable_declarations :: proc(block_statement: ^Ast_Node) 
     return declarations
 }
 
+get_switch_info :: proc(statement: Switch_Node, info: ^Emit_Info) -> Switch_Info {
+    expr_offset := info.rbp_offset
+    case_count := count_case_labels(statement.block) + 1 // We have an extra label to jump to the end of the switch statement (or to the default case)
+    return Switch_Info{expr_offset, case_count, current_label}
+}
+
+count_case_labels :: proc(statement: ^Ast_Node) -> int {
+    case_label_count := 0
+    for label in statement.labels {
+        if _, is_case := label.(int); is_case do case_label_count += 1
+    }
+
+    #partial switch stmt in statement.variant {
+        case If_Node:
+            case_label_count += count_case_labels(stmt.if_true)
+
+        case If_Else_Node:
+            case_label_count += count_case_labels(stmt.if_true)
+            case_label_count += count_case_labels(stmt.if_false)
+
+        case While_Node:
+            case_label_count += count_case_labels(stmt.if_true)            
+
+        case Do_While_Node:
+            case_label_count += count_case_labels(stmt.if_true)            
+
+        case For_Node:
+            #partial switch pre in stmt.pre_condition.variant {
+                case Decl_Node, Decl_Assign_Node:
+                    case_label_count += 1
+            }
+            case_label_count += count_case_labels(stmt.if_true)            
+
+        case Compound_Statement_Node:
+            for statement in stmt.statements {
+                case_label_count += count_case_labels(statement)
+            }
+    }
+
+    return case_label_count
+}
+
 emit_function :: proc(builder: ^strings.Builder, function: Function_Node, parent_offsets: ^Scoped_Variable_Offsets) {
     labels := validate_and_gather_function_labels(function)
-    info := Emit_Info{labels[:], make([dynamic]Loop_Labels), 4}
 
     fmt.sbprintfln(builder, ".globl %v", function.name)
     fmt.sbprintfln(builder, "%v:", function.name)
     fmt.sbprintln(builder, "  push %rbp")
     fmt.sbprintln(builder, "  mov %rsp, %rbp")
 
-    rsp_decrement := count_function_variable_declarations(function) * 4
+    rsp_decrement := count_function_variable_declarations(function) * 8
     if rsp_decrement > 0 {
         fmt.sbprintfln(builder, "  sub $%v, %%rsp", rsp_decrement)
+    }
+
+    info := Emit_Info{
+        labels = labels[:],
+        loop_labels = make([dynamic]Loop_Labels),
+        variable_offset = 8,
+        rbp_offset = rsp_decrement,
+        switch_infos = make([dynamic]Switch_Info),
     }
 
     offsets := make_scoped_variable_offsets(parent_offsets)

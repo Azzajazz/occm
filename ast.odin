@@ -10,7 +10,7 @@ Program :: struct {
 
 Label :: union {
     string,
-    ^Ast_Node,
+    int, // For case labels
 }
 
 Ast_Node :: struct {
@@ -236,8 +236,8 @@ pretty_print_node :: proc(node: Ast_Node, indent := 0) {
         switch l in label {
             case string:
                 fmt.printf("%v: ", l)
-            case ^Ast_Node:
-                fmt.printf("case %v: ", l.variant.(Int_Constant_Node).value)
+            case int:
+                fmt.printf("case %v: ", l)
         }
     }
 
