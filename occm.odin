@@ -1649,6 +1649,9 @@ emit_statement :: proc(builder: ^strings.Builder, statement: ^Ast_Node, parent_o
                 fmt.sbprintfln(builder, "  cmp $%v, %%eax", value)
                 fmt.sbprintfln(builder, "  je L%v", switch_info.start_label + i)
             }
+            if switch_info.has_default {
+                fmt.sbprintfln(builder, "  jmp L%v", switch_end_label(switch_info) - 1)
+            }
 
             emit_statement(builder, stmt.block, parent_offsets, info, function_name)
             emit_label(builder, switch_end_label(switch_info))
