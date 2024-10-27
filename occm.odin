@@ -1076,6 +1076,18 @@ Switch_Info :: struct {
     start_label: int,
     current_label: int,
     label_values: [dynamic]int,
+    has_default: bool,
+}
+
+switch_end_label :: proc(info: Switch_Info) -> int {
+    end_label := info.start_label + len(info.label_values)
+    if info.has_default do end_label += 1
+    return end_label
+}
+
+Containing_Control_Flow :: enum {
+    Loop,
+    Switch,
 }
 
 Emit_Info :: struct {
@@ -1084,6 +1096,7 @@ Emit_Info :: struct {
     variable_offset: int, // Offset of previously allocated stack variables
     rbp_offset: int, // Actual offset from rbp
     switch_infos: [dynamic]Switch_Info,
+    containing_control_flows: [dynamic]Containing_Control_Flow,
 }
 
 current_label := 1
@@ -1556,6 +1569,7 @@ emit_statement :: proc(builder: ^strings.Builder, statement: ^Ast_Node, parent_o
             label := current_label
             current_label += 2
             append(&info.loop_labels, Loop_Labels{continue_label = label, break_label = label + 1})
+            append(&info.containing_control_flows, Containing_Control_Flow.Loop)
             emit_label(builder, label)
             emit_expr(builder, stmt.condition, parent_offsets, info)
             fmt.sbprintln(builder, "  cmp $0, %eax")
@@ -1563,12 +1577,14 @@ emit_statement :: proc(builder: ^strings.Builder, statement: ^Ast_Node, parent_o
             emit_statement(builder, stmt.if_true, parent_offsets, info, function_name)
             fmt.sbprintfln(builder, "  jmp L%v", label)
             emit_label(builder, label + 1)
+            pop(&info.containing_control_flows)
             pop(&info.loop_labels)
 
         case Do_While_Node:
             label := current_label
             current_label += 3
             append(&info.loop_labels, Loop_Labels{continue_label = label + 1, break_label = label + 2})
+            append(&info.containing_control_flows, Containing_Control_Flow.Loop)
             emit_label(builder, label)
             emit_statement(builder, stmt.if_true, parent_offsets, info, function_name)
             emit_label(builder, label + 1)
@@ -1577,6 +1593,7 @@ emit_statement :: proc(builder: ^strings.Builder, statement: ^Ast_Node, parent_o
             fmt.sbprintfln(builder, "  je L%v", label + 2)
             fmt.sbprintfln(builder, "  jmp L%v", label)
             emit_label(builder, label + 2)
+            pop(&info.containing_control_flows)
             pop(&info.loop_labels)
 
         case For_Node:
@@ -1585,6 +1602,7 @@ emit_statement :: proc(builder: ^strings.Builder, statement: ^Ast_Node, parent_o
             label := current_label
             current_label += 3
             append(&info.loop_labels, Loop_Labels{continue_label = label + 1, break_label = label + 2})
+            append(&info.containing_control_flows, Containing_Control_Flow.Loop)
             emit_block_statement(builder, stmt.pre_condition, offsets, info, function_name)
             emit_label(builder, label)
             emit_expr(builder, stmt.condition, offsets, info)
@@ -1597,6 +1615,7 @@ emit_statement :: proc(builder: ^strings.Builder, statement: ^Ast_Node, parent_o
             }
             fmt.sbprintfln(builder, "  jmp L%v", label)
             emit_label(builder, label + 2)
+            pop(&info.containing_control_flows)
             pop(&info.loop_labels)
 
         case Continue_Node:
@@ -1604,8 +1623,14 @@ emit_statement :: proc(builder: ^strings.Builder, statement: ^Ast_Node, parent_o
             fmt.sbprintfln(builder, "  jmp L%v", slice.last(info.loop_labels[:]).continue_label)
 
         case Break_Node:
-            if len(info.loop_labels) == 0 do semantic_error()
-            fmt.sbprintfln(builder, "  jmp L%v", slice.last(info.loop_labels[:]).break_label)
+            if len(info.containing_control_flows) == 0 do semantic_error()
+            last_control_flow := slice.last(info.containing_control_flows[:])
+            if last_control_flow == .Loop {
+                fmt.sbprintfln(builder, "  jmp L%v", slice.last(info.loop_labels[:]).break_label)
+            }
+            else {
+                fmt.sbprintfln(builder, "  jmp L%v", switch_end_label(slice.last(info.switch_infos[:])))
+            }
 
         case Goto_Node:
             fmt.println(info)
@@ -1616,7 +1641,8 @@ emit_statement :: proc(builder: ^strings.Builder, statement: ^Ast_Node, parent_o
         case Switch_Node:
             switch_info := get_switch_info(stmt, info)
             append(&info.switch_infos, switch_info) 
-            current_label = switch_info.start_label + len(switch_info.label_values)
+            append(&info.containing_control_flows, Containing_Control_Flow.Switch)
+            current_label = switch_end_label(switch_info) + 1
 
             emit_expr(builder, stmt.expr, parent_offsets, info)
             for value, i in switch_info.label_values {
@@ -1625,6 +1651,8 @@ emit_statement :: proc(builder: ^strings.Builder, statement: ^Ast_Node, parent_o
             }
 
             emit_statement(builder, stmt.block, parent_offsets, info, function_name)
+            emit_label(builder, switch_end_label(switch_info))
+            pop(&info.containing_control_flows)
             pop(&info.switch_infos)
 
         case Compound_Statement_Node:
@@ -1716,38 +1744,43 @@ get_switch_info :: proc(statement: Switch_Node, info: ^Emit_Info) -> Switch_Info
     result: Switch_Info
     result.start_label = current_label
     result.label_values = make([dynamic]int)
-    get_case_label_values(&result.label_values, statement.block)
+    get_case_label_values(&result, statement.block)
     result.current_label = result.start_label
     return result
 }
 
-get_case_label_values :: proc(values: ^[dynamic]int, statement: ^Ast_Node) {
+get_case_label_values :: proc(info: ^Switch_Info, statement: ^Ast_Node) {
     for label in statement.labels {
-        if value, is_case := label.(int); is_case {
-            append(values, value)
+        #partial switch l in label {
+            case int:
+                if info.has_default do semantic_error()
+                append(&info.label_values, l)
+
+            case Default_Label:
+                info.has_default = true
         }
     }
 
     #partial switch stmt in statement.variant {
         case If_Node:
-            get_case_label_values(values, stmt.if_true)
+            get_case_label_values(info, stmt.if_true)
 
         case If_Else_Node:
-            get_case_label_values(values, stmt.if_true)
-            get_case_label_values(values, stmt.if_false)
+            get_case_label_values(info, stmt.if_true)
+            get_case_label_values(info, stmt.if_false)
 
         case While_Node:
-            get_case_label_values(values, stmt.if_true)            
+            get_case_label_values(info, stmt.if_true)            
 
         case Do_While_Node:
-            get_case_label_values(values, stmt.if_true)            
+            get_case_label_values(info, stmt.if_true)            
 
         case For_Node:
-            get_case_label_values(values, stmt.if_true)            
+            get_case_label_values(info, stmt.if_true)            
 
         case Compound_Statement_Node:
             for statement in stmt.statements {
-                get_case_label_values(values, statement)
+                get_case_label_values(info, statement)
             }
     }
 }
@@ -1771,6 +1804,7 @@ emit_function :: proc(builder: ^strings.Builder, function: Function_Node, parent
         variable_offset = 8,
         rbp_offset = rsp_decrement,
         switch_infos = make([dynamic]Switch_Info),
+        containing_control_flows = make([dynamic]Containing_Control_Flow)
     }
 
     offsets := make_scoped_variable_offsets(parent_offsets)
