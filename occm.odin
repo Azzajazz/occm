@@ -62,6 +62,7 @@ Token_Type :: enum {
     BreakKeyword,
     SwitchKeyword,
     CaseKeyword,
+    DefaultKeyword,
     Ident,
     IntConstant,
     Semicolon,
@@ -114,6 +115,7 @@ get_keyword_or_ident_token :: proc(input: string) -> (token: Token, rest: string
     else if text == "break" do return Token{.BreakKeyword, text, {}}, input[byte_index:]
     else if text == "switch" do return Token{.SwitchKeyword, text, {}}, input[byte_index:]
     else if text == "case" do return Token{.CaseKeyword, text, {}}, input[byte_index:]
+    else if text == "default" do return Token{.DefaultKeyword, text, {}}, input[byte_index:]
     else do return Token{.Ident, text, {}}, input[byte_index:]
 }
 
@@ -711,6 +713,11 @@ parse_labels :: proc(tokens: []Token) -> ([dynamic]Label, []Token) {
 
     for {
         token := peek_first_token(tokens)
+        if token.type == .DefaultKeyword {
+            token, tokens = take_first_token(tokens[1:])
+            if token.type != .Colon do parse_error(token, tokens)
+            append(&labels, Default_Label{})
+        }
         if token.type == .CaseKeyword {
             token, tokens = take_first_token(tokens[1:])
             if token.type != .IntConstant do parse_error(token, tokens)
@@ -1509,6 +1516,11 @@ emit_statement :: proc(builder: ^strings.Builder, statement: ^Ast_Node, parent_o
                 switch_info := slice.last_ptr(info.switch_infos[:])
                 emit_label(builder, switch_info.current_label)
                 switch_info.current_label += 1
+            case Default_Label:
+                if len(info.switch_infos) == 0 do semantic_error()
+                switch_info := slice.last_ptr(info.switch_infos[:])
+                emit_label(builder, switch_info.current_label)
+                // We don't increment switch_info.current_label, since default labels must come last in a switch statement
         }
     }
 

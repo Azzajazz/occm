@@ -8,9 +8,12 @@ Program :: struct {
     children: [dynamic]^Ast_Node,
 }
 
+Default_Label :: struct{}
+
 Label :: union {
     string,
     int, // For case labels
+    Default_Label,
 }
 
 Ast_Node :: struct {
@@ -238,6 +241,8 @@ pretty_print_node :: proc(node: Ast_Node, indent := 0) {
                 fmt.printf("%v: ", l)
             case int:
                 fmt.printf("case %v: ", l)
+            case Default_Label:
+                fmt.print("default: ")
         }
     }
 
