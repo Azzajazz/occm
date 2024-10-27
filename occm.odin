@@ -718,9 +718,9 @@ parse_labels :: proc(tokens: []Token) -> ([dynamic]Label, []Token) {
             if token.type != .Colon do parse_error(token, tokens)
             append(&labels, Default_Label{})
         }
-        if token.type == .CaseKeyword {
+        else if token.type == .CaseKeyword {
             token, tokens = take_first_token(tokens[1:])
-            if token.type != .IntConstant do parse_error(token, tokens)
+            if token.type != .IntConstant do semantic_error() // Ewww
             constant := token.data.(int)
             token, tokens = take_first_token(tokens)
             if token.type != .Colon do parse_error(token, tokens)
