@@ -999,7 +999,7 @@ semantic_error :: proc(location := #caller_location) {
 
 validate_and_gather_block_statement_labels :: proc(block_statement: ^Ast_Node, labels: ^[dynamic]Label) {
     for label in block_statement.labels {
-        if contains(label, labels[:]) do semantic_error()
+        if _, is_normal := label.(string); is_normal && contains(label, labels[:]) do semantic_error()
         append(labels, label)
     }
 
@@ -1075,13 +1075,12 @@ Loop_Labels :: struct {
 Switch_Info :: struct {
     start_label: int,
     current_label: int,
-    label_values: [dynamic]int,
+    labels: [dynamic]Label,
     has_default: bool,
 }
 
 switch_end_label :: proc(info: Switch_Info) -> int {
-    end_label := info.start_label + len(info.label_values)
-    if info.has_default do end_label += 1
+    end_label := info.start_label + len(info.labels)
     return end_label
 }
 
@@ -1524,16 +1523,11 @@ emit_statement :: proc(builder: ^strings.Builder, statement: ^Ast_Node, parent_o
         switch l in label {
             case string:
                 fmt.sbprintfln(builder, "_%v:", l)
-            case int:
+            case int, Default_Label:
                 if len(info.switch_infos) == 0 do semantic_error()
                 switch_info := slice.last_ptr(info.switch_infos[:])
                 emit_label(builder, switch_info.current_label)
                 switch_info.current_label += 1
-            case Default_Label:
-                if len(info.switch_infos) == 0 do semantic_error()
-                switch_info := slice.last_ptr(info.switch_infos[:])
-                emit_label(builder, switch_info.current_label)
-                // We don't increment switch_info.current_label, since default labels must come last in a switch statement
         }
     }
 
@@ -1645,12 +1639,19 @@ emit_statement :: proc(builder: ^strings.Builder, statement: ^Ast_Node, parent_o
             current_label = switch_end_label(switch_info) + 1
 
             emit_expr(builder, stmt.expr, parent_offsets, info)
-            for value, i in switch_info.label_values {
-                fmt.sbprintfln(builder, "  cmp $%v, %%eax", value)
-                fmt.sbprintfln(builder, "  je L%v", switch_info.start_label + i)
-            }
-            if switch_info.has_default {
-                fmt.sbprintfln(builder, "  jmp L%v", switch_end_label(switch_info) - 1)
+            fmt.println(switch_info)
+            for label, i in switch_info.labels {
+                switch l in label {
+                    case int:
+                        fmt.sbprintfln(builder, "  cmp $%v, %%eax", l)
+                        fmt.sbprintfln(builder, "  je L%v", switch_info.start_label + i)
+
+                    case Default_Label:
+                        fmt.sbprintfln(builder, "  jmp L%v", switch_info.start_label + i)
+
+                    case string:
+                        panic("Unreachable")
+                }
             }
 
             emit_statement(builder, stmt.block, parent_offsets, info, function_name)
@@ -1746,44 +1747,40 @@ count_block_statement_variable_declarations :: proc(block_statement: ^Ast_Node) 
 get_switch_info :: proc(statement: Switch_Node, info: ^Emit_Info) -> Switch_Info {
     result: Switch_Info
     result.start_label = current_label
-    result.label_values = make([dynamic]int)
-    get_case_label_values(&result, statement.block)
+    result.labels = make([dynamic]Label)
+    get_switch_labels(&result, statement.block)
     result.current_label = result.start_label
     return result
 }
 
-get_case_label_values :: proc(info: ^Switch_Info, statement: ^Ast_Node) {
+get_switch_labels :: proc(info: ^Switch_Info, statement: ^Ast_Node) {
     for label in statement.labels {
         #partial switch l in label {
-            case int:
-                if info.has_default do semantic_error()
-                append(&info.label_values, l)
-
-            case Default_Label:
-                info.has_default = true
+            case int, Default_Label:
+                append(&info.labels, label)
         }
     }
 
     #partial switch stmt in statement.variant {
         case If_Node:
-            get_case_label_values(info, stmt.if_true)
+            get_switch_labels(info, stmt.if_true)
 
         case If_Else_Node:
-            get_case_label_values(info, stmt.if_true)
-            get_case_label_values(info, stmt.if_false)
+            get_switch_labels(info, stmt.if_true)
+            get_switch_labels(info, stmt.if_false)
 
         case While_Node:
-            get_case_label_values(info, stmt.if_true)            
+            get_switch_labels(info, stmt.if_true)            
 
         case Do_While_Node:
-            get_case_label_values(info, stmt.if_true)            
+            get_switch_labels(info, stmt.if_true)            
 
         case For_Node:
-            get_case_label_values(info, stmt.if_true)            
+            get_switch_labels(info, stmt.if_true)            
 
         case Compound_Statement_Node:
             for statement in stmt.statements {
-                get_case_label_values(info, statement)
+                get_switch_labels(info, statement)
             }
     }
 }
