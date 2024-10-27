@@ -1004,6 +1004,18 @@ validate_and_gather_block_statement_labels :: proc(block_statement: ^Ast_Node, l
             validate_and_gather_block_statement_labels(stmt.if_true, labels)
             validate_and_gather_block_statement_labels(stmt.if_false, labels)
 
+        case While_Node:
+            validate_and_gather_block_statement_labels(stmt.if_true, labels)            
+
+        case Do_While_Node:
+            validate_and_gather_block_statement_labels(stmt.if_true, labels)            
+
+        case For_Node:
+            validate_and_gather_block_statement_labels(stmt.if_true, labels)            
+
+        case Switch_Node:
+            validate_and_gather_block_statement_labels(stmt.block, labels)
+
         case Compound_Statement_Node:
             for statement in stmt.statements {
                 validate_and_gather_block_statement_labels(statement, labels)
@@ -1585,6 +1597,7 @@ emit_statement :: proc(builder: ^strings.Builder, statement: ^Ast_Node, parent_o
 
         case Goto_Node:
             fmt.println(info)
+            fmt.println(info.labels)
             if !contains(cast(Label)stmt.label, info.labels) do semantic_error()
             fmt.sbprintfln(builder, "  jmp _%v", stmt.label)
 
