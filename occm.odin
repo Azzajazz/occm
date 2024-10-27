@@ -1653,6 +1653,7 @@ emit_statement :: proc(builder: ^strings.Builder, statement: ^Ast_Node, parent_o
                         panic("Unreachable")
                 }
             }
+            fmt.sbprintfln(builder, "  jmp L%v", switch_end_label(switch_info))
 
             emit_statement(builder, stmt.block, parent_offsets, info, function_name)
             emit_label(builder, switch_end_label(switch_info))
