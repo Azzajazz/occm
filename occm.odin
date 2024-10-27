@@ -1758,6 +1758,7 @@ get_switch_labels :: proc(info: ^Switch_Info, statement: ^Ast_Node) {
     for label in statement.labels {
         #partial switch l in label {
             case int, Default_Label:
+                if contains(label, statement.labels[:]) do semantic_error()
                 append(&info.labels, label)
         }
     }
