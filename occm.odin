@@ -25,6 +25,7 @@ Token_Type :: enum {
     Carat,
     ForwardSlash,
     Plus,
+    Comma,
     PlusPlus, // ++
     And,
     DoubleAnd, // &&
@@ -51,6 +52,7 @@ Token_Type :: enum {
     MoreMoreEqual, // >>=
 
     IntKeyword,
+    VoidKeyword,
     ReturnKeyword,
     IfKeyword,
     ElseKeyword,
@@ -105,6 +107,7 @@ get_keyword_or_ident_token :: proc(input: string) -> (token: Token, rest: string
     text := input[:byte_index]
     if text == "return" do return Token{.ReturnKeyword, text, {}}, input[byte_index:]
     else if text == "int" do return Token{.IntKeyword, text, {}}, input[byte_index:]
+    else if text == "void" do return Token{.VoidKeyword, text, {}}, input[byte_index:]
     else if text == "if" do return Token{.IfKeyword, text, {}}, input[byte_index:]
     else if text == "else" do return Token{.ElseKeyword, text, {}}, input[byte_index:]
     else if text == "goto" do return Token{.GotoKeyword, text, {}}, input[byte_index:]
@@ -297,6 +300,11 @@ lex :: proc(code: string) -> [dynamic]Token {
                     code = code[1:]
                     continue
                 }
+
+            case ',':
+                append(&tokens, Token{.Comma, code[:1], {}})
+                code = code[1:]
+                continue
 
             case '>':
                 if code[1] == '=' {
@@ -954,10 +962,28 @@ parse_function :: proc(tokens: []Token) -> (^Ast_Node, []Token) {
 
     token, tokens = take_first_token(tokens)
     if token.type != .LParen do parse_error(token, tokens)
+    args := make([dynamic]string)
     token, tokens = take_first_token(tokens)
-    if token.type != .Ident || token.text != "void" do parse_error(token, tokens)
-    token, tokens = take_first_token(tokens)
-    if token.type != .RParen do parse_error(token, tokens)
+    if token.type == .IntKeyword {
+        token, tokens = take_first_token(tokens)
+        if token.type != .Ident do parse_error(token, tokens)
+        append(&args, token.text)
+        for token, tokens = take_first_token(tokens); token.type != .RParen; token, tokens = take_first_token(tokens) {
+            if token.type != .Comma do parse_error(token, tokens)
+            token, tokens = take_first_token(tokens)
+            if token.type != .IntKeyword do parse_error(token, tokens)
+            token, tokens = take_first_token(tokens)
+            if token.type != .Ident do parse_error(token, tokens)
+            append(&args, token.text)
+        }
+    }
+    else if token.type == .VoidKeyword {
+        token, tokens = take_first_token(tokens)
+        if token.type != .RParen do parse_error(token, tokens)
+    }
+    else {
+        parse_error(token, tokens)
+    }
 
     token, tokens = take_first_token(tokens)
     if token.type != .LBrace do parse_error(token, tokens)
@@ -965,10 +991,7 @@ parse_function :: proc(tokens: []Token) -> (^Ast_Node, []Token) {
     body: [dynamic]^Ast_Node = ---
     body, tokens = parse_block_statement_list(tokens)
 
-    // @HACK: This will need to change when we parse multiple functions
-    if len(tokens) > 0 do parse_error(token, tokens)
-
-    return make_node_2(Function_Node, name, body), tokens
+    return make_node_3(Function_Node, name, args, body), tokens
 }
 
 parse :: proc(tokens: []Token) -> Program {

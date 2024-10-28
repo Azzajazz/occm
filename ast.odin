@@ -80,6 +80,7 @@ Ast_Node :: struct {
 
 Function_Node :: struct {
     name: string,
+    args: [dynamic]string,
     body: [dynamic]^Ast_Node,
 }
 
