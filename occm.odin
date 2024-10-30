@@ -1236,6 +1236,7 @@ emit_binary_op :: proc(builder: ^strings.Builder, op: ^Ast_Node, vars: ^Scoped_V
             fmt.sbprintln(builder, "  push %rax")
             emit_expr(builder, o.right, vars, info)
             fmt.sbprintln(builder, "  pop %rbx")
+            fmt.sbprintln(builder, "  push %rdx") // rdx could be a function parameter, so we need to save it
             fmt.sbprintln(builder, "  xor %edx, %edx")
             fmt.sbprintln(builder, "  cmp $0, %ebx")
             fmt.sbprintfln(builder, "  jge L%v", current_label)
@@ -1245,12 +1246,14 @@ emit_binary_op :: proc(builder: ^strings.Builder, op: ^Ast_Node, vars: ^Scoped_V
             fmt.sbprintln(builder, "  mov %ebx, %eax")
             fmt.sbprintln(builder, "  idiv %ecx")
             fmt.sbprintln(builder, "  mov %edx, %eax")
+            fmt.sbprintln(builder, "  pop %rdx")
 
         case Divide_Node:
             emit_expr(builder, o.left, vars, info)
             fmt.sbprintln(builder, "  push %rax")
             emit_expr(builder, o.right, vars, info)
             fmt.sbprintln(builder, "  pop %rbx")
+            fmt.sbprintln(builder, "  push %rdx") // rdx could be a function parameter, so we need to save it
             fmt.sbprintln(builder, "  xor %edx, %edx")
             fmt.sbprintln(builder, "  cmp $0, %ebx")
             fmt.sbprintfln(builder, "  jge L%v", current_label)
@@ -1259,6 +1262,7 @@ emit_binary_op :: proc(builder: ^strings.Builder, op: ^Ast_Node, vars: ^Scoped_V
             fmt.sbprintln(builder, "  mov %eax, %ecx")
             fmt.sbprintln(builder, "  mov %ebx, %eax")
             fmt.sbprintln(builder, "  idiv %ecx")
+            fmt.sbprintln(builder, "  pop %rdx")
 
         case Boolean_And_Node:
             emit_expr(builder, o.left, vars, info)
