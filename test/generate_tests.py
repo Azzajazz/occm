@@ -17,7 +17,7 @@ def generate_exp_file_with_gcc(path: str):
 
 def main():
     for root, dirs, files in os.walk("."):
-        if os.path.basename(root) == "valid":
+        if "valid\\" in root:
             for file in files:
                 if file.endswith(".c"):
                     generate_exp_file_with_gcc(os.path.join(root, file))
