@@ -82,12 +82,12 @@ Ast_Node :: struct {
 
 Function_Declaration_Node :: struct {
     name: string,
-    args: [dynamic]string,
+    params: [dynamic]string,
 }
 
 Function_Definition_Node :: struct {
     name: string,
-    args: [dynamic]string,
+    params: [dynamic]string,
     body: [dynamic]^Ast_Node,
 }
 
@@ -180,7 +180,7 @@ Ternary_Node :: struct {
 
 Function_Call_Node :: struct {
     name: string,
-    params: [dynamic]^Ast_Node,
+    args: [dynamic]^Ast_Node,
 }
 
 If_Node :: struct {

@@ -1544,12 +1544,12 @@ emit_expr :: proc(builder: ^strings.Builder, expr: ^Ast_Node, vars: ^Scoped_Vari
             emit_label(builder, label + 1)
 
         case Function_Call_Node:
-            #reverse for param in e.params {
-                emit_expr(builder, param, vars, info)
+            #reverse for arg in e.args {
+                emit_expr(builder, arg, vars, info)
                 fmt.sbprintln(builder, "  push %rax")
             }
             fmt.sbprintfln(builder, "  call %v", e.name)
-            fmt.sbprintfln(builder, "  add $%v, %%rsp", len(e.params) * 8)
+            fmt.sbprintfln(builder, "  add $%v, %%rsp", len(e.args) * 8)
 
         case:
             fmt.println(expr)
@@ -1869,8 +1869,8 @@ emit_function :: proc(builder: ^strings.Builder, function: Function_Definition_N
 
     // Make a new Scoped_Variable_Offsets for the function local variables, including function parameters
     offsets := make_scoped_variable_offsets(parent_offsets)
-    #reverse for arg, i in function.args {
-        offsets.var_offsets[arg] = i * 8 + 16 // Add 16 to allow for the CALL instruction pushing RIP and flags on the stack
+    #reverse for param, i in function.params {
+        offsets.var_offsets[param] = i * 8 + 16 // Add 16 to allow for the CALL instruction pushing RIP and flags on the stack
     }
 
     for statement in function.body {
