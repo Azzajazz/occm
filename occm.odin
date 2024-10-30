@@ -752,7 +752,8 @@ parse_labels :: proc(tokens: []Token) -> ([dynamic]Label, []Token) {
         }
         else if token.type == .CaseKeyword {
             token, tokens = take_first_token(tokens[1:])
-            if token.type != .IntConstant do parse_error(token, tokens)
+            if token.type == .Colon do parse_error(token, tokens)
+            if token.type != .IntConstant do semantic_error()
             constant := token.data.(int)
             token, tokens = take_first_token(tokens)
             if token.type != .Colon do parse_error(token, tokens)
@@ -1816,7 +1817,7 @@ get_switch_labels :: proc(info: ^Switch_Info, statement: ^Ast_Node) {
     for label in statement.labels {
         #partial switch l in label {
             case int, Default_Label:
-                if contains(label, statement.labels[:]) do semantic_error()
+                if contains(label, info.labels[:]) do semantic_error()
                 append(&info.labels, label)
         }
     }
