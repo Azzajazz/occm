@@ -21,7 +21,8 @@ Ast_Node :: struct {
 
     // Common stuff would go here
     variant: union {
-        Function_Node,
+        Function_Declaration_Node,
+        Function_Definition_Node,
         Int_Constant_Node,
         Ident_Node,
         Negate_Node,
@@ -67,6 +68,7 @@ Ast_Node :: struct {
         Decl_Node,
         Compound_Statement_Node,
         Ternary_Node,
+        Function_Call_Node,
         If_Node,
         If_Else_Node,
         While_Node,
@@ -78,7 +80,12 @@ Ast_Node :: struct {
     },
 }
 
-Function_Node :: struct {
+Function_Declaration_Node :: struct {
+    name: string,
+    args: [dynamic]string,
+}
+
+Function_Definition_Node :: struct {
     name: string,
     args: [dynamic]string,
     body: [dynamic]^Ast_Node,
@@ -169,6 +176,11 @@ Ternary_Node :: struct {
     condition: ^Ast_Node,
     if_true: ^Ast_Node,
     if_false: ^Ast_Node,
+}
+
+Function_Call_Node :: struct {
+    name: string,
+    params: [dynamic]^Ast_Node,
 }
 
 If_Node :: struct {
