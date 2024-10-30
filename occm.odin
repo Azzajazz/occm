@@ -1105,7 +1105,11 @@ get_offset :: proc(offsets: ^Scoped_Variable_Offsets, var_name: string) -> int {
 is_defined :: proc(offsets: ^Scoped_Variable_Offsets, var_name: string) -> bool {
     if offsets.parent == nil do return var_name in offsets.var_offsets
 
-    if var_name in offsets.var_offsets {
+    if var_name in offsets.var_offsets \
+        || offsets.rcx == var_name \
+        || offsets.rdx == var_name \
+        || offsets.r8 == var_name \
+        || offsets.r9 == var_name {
         return true
     }
     else {
@@ -1544,12 +1548,38 @@ emit_expr :: proc(builder: ^strings.Builder, expr: ^Ast_Node, vars: ^Scoped_Vari
             emit_label(builder, label + 1)
 
         case Function_Call_Node:
-            #reverse for arg in e.args {
-                emit_expr(builder, arg, vars, info)
-                fmt.sbprintln(builder, "  push %rax")
+            // x64 calling convention
+            // - First argument in rcx
+            // - Second argument in rdx
+            // - Third argument in r8
+            // - Fourth argument in r9
+            // - Remaining args pushed right-to-left to stack
+            if len(e.args) > 0 {
+                emit_expr(builder, e.args[0], vars, info)
+                fmt.sbprintln(builder, "  mov %rax, %rcx")
+            }
+            if len(e.args) > 1 {
+                emit_expr(builder, e.args[1], vars, info)
+                fmt.sbprintln(builder, "  mov %rax, %rdx")
+            }
+            if len(e.args) > 2 {
+                emit_expr(builder, e.args[2], vars, info)
+                fmt.sbprintln(builder, "  mov %rax, %r8")
+            }
+            if len(e.args) > 3 {
+                emit_expr(builder, e.args[3], vars, info)
+                fmt.sbprintln(builder, "  mov %rax, %r9")
+            }
+            if len(e.args) > 4 {
+                #reverse for arg in e.args[4:] {
+                    emit_expr(builder, arg, vars, info)
+                    fmt.sbprintln(builder, "  push %rax")
+                }
             }
             fmt.sbprintfln(builder, "  call %v", e.name)
-            fmt.sbprintfln(builder, "  add $%v, %%rsp", len(e.args) * 8)
+            if len(e.args) > 4 {
+                fmt.sbprintfln(builder, "  add $%v, %%rsp", len(e.args[4:]))
+            }
 
         case:
             fmt.println(expr)
@@ -1733,27 +1763,23 @@ emit_statement :: proc(builder: ^strings.Builder, statement: ^Ast_Node, parent_o
 Scoped_Variable_Offsets :: struct {
     parent: ^Scoped_Variable_Offsets,
     var_offsets: map[string]int,
+
+    // For function parameters
+    rcx: string,
+    rdx: string,
+    r8: string,
+    r9: string,
 }
 
 make_scoped_variable_offsets :: proc(parent: ^Scoped_Variable_Offsets) -> ^Scoped_Variable_Offsets {
     vars := new(Scoped_Variable_Offsets)
     vars.parent = parent
     vars.var_offsets = make(map[string]int)
+    vars.rcx = ""
+    vars.rdx = ""
+    vars.r8 = ""
+    vars.r9 = ""
     return vars
-}
-
-print_scoped_variable_offsets :: proc(vars: ^Scoped_Variable_Offsets, indent := 0) {
-    print_indent(indent)
-    fmt.print("vars=(")
-    if len(vars.var_offsets) != 0 {
-        fmt.println()
-        for var in vars.var_offsets {
-            print_indent(indent + 1)
-            fmt.println(var)
-        }
-        print_indent(indent)
-    }
-    fmt.println(")")
 }
 
 count_function_variable_declarations :: proc(function: Function_Definition_Node) -> int {
@@ -1868,9 +1894,24 @@ emit_function :: proc(builder: ^strings.Builder, function: Function_Definition_N
     }
 
     // Make a new Scoped_Variable_Offsets for the function local variables, including function parameters
+    // Function parameters follow the x64 calling convention
     offsets := make_scoped_variable_offsets(parent_offsets)
-    #reverse for param, i in function.params {
-        offsets.var_offsets[param] = i * 8 + 16 // Add 16 to allow for the CALL instruction pushing RIP and flags on the stack
+    if len(function.params) > 0 {
+        offsets.rcx = function.params[0]
+    }
+    if len(function.params) > 1 {
+        offsets.rcx = function.params[1]
+    }
+    if len(function.params) > 2 {
+        offsets.rcx = function.params[2]
+    }
+    if len(function.params) > 3 {
+        offsets.rcx = function.params[3]
+    }
+    if len(function.params) > 4 {
+        #reverse for param, i in function.params[4:] {
+            offsets.var_offsets[param] = i * 8 + 16 // Add 16 to allow for the CALL instruction pushing RIP and flags on the stack
+        }
     }
 
     for statement in function.body {
