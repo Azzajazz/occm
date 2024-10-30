@@ -1894,8 +1894,9 @@ emit :: proc(program: Program) -> string {
     offsets := make_scoped_variable_offsets(nil) // Global scope has no parent
 
     for node in program.children {
-        function := node.variant.(Function_Definition_Node)
-        emit_function(&builder, function, offsets)
+        if def, is_def := node.variant.(Function_Definition_Node); is_def {
+            emit_function(&builder, def, offsets)
+        }
     }
 
     return strings.to_string(builder)
