@@ -1283,6 +1283,7 @@ emit_binary_op :: proc(builder: ^strings.Builder, op: ^Ast_Node, vars: ^Scoped_V
             emit_expr(builder, o.right, vars, info)
             fmt.sbprintln(builder, "  pop %rbx")
             fmt.sbprintln(builder, "  push %rdx") // rdx could be a function parameter, so we need to save it
+            fmt.sbprintln(builder, "  push %rcx") // rcx could be a function parameter, so we need to save it
             fmt.sbprintln(builder, "  xor %edx, %edx")
             fmt.sbprintln(builder, "  cmp $0, %ebx")
             fmt.sbprintfln(builder, "  jge L%v", current_label)
@@ -1292,6 +1293,7 @@ emit_binary_op :: proc(builder: ^strings.Builder, op: ^Ast_Node, vars: ^Scoped_V
             fmt.sbprintln(builder, "  mov %ebx, %eax")
             fmt.sbprintln(builder, "  idiv %ecx")
             fmt.sbprintln(builder, "  mov %edx, %eax")
+            fmt.sbprintln(builder, "  pop %rcx")
             fmt.sbprintln(builder, "  pop %rdx")
 
         case Divide_Node:
@@ -1300,6 +1302,7 @@ emit_binary_op :: proc(builder: ^strings.Builder, op: ^Ast_Node, vars: ^Scoped_V
             emit_expr(builder, o.right, vars, info)
             fmt.sbprintln(builder, "  pop %rbx")
             fmt.sbprintln(builder, "  push %rdx") // rdx could be a function parameter, so we need to save it
+            fmt.sbprintln(builder, "  push %rcx") // rcx could be a function parameter, so we need to save it
             fmt.sbprintln(builder, "  xor %edx, %edx")
             fmt.sbprintln(builder, "  cmp $0, %ebx")
             fmt.sbprintfln(builder, "  jge L%v", current_label)
@@ -1308,6 +1311,7 @@ emit_binary_op :: proc(builder: ^strings.Builder, op: ^Ast_Node, vars: ^Scoped_V
             fmt.sbprintln(builder, "  mov %eax, %ecx")
             fmt.sbprintln(builder, "  mov %ebx, %eax")
             fmt.sbprintln(builder, "  idiv %ecx")
+            fmt.sbprintln(builder, "  pop %rcx")
             fmt.sbprintln(builder, "  pop %rdx")
 
         case Boolean_And_Node:
@@ -1476,6 +1480,7 @@ emit_assign_op :: proc(builder: ^strings.Builder, op: ^Ast_Node, offsets: ^Scope
             loc_asm := location_to_assembly(get_location(offsets, o.left.variant.(Ident_Node).var_name))
             fmt.sbprintln(builder, "  mov %eax, %ebx")
             fmt.sbprintfln(builder, "  mov %v, %%eax", loc_asm)
+            fmt.sbprintln(builder, "  push %rdx") // rdx could be a function parameter, so we need to save it
             fmt.sbprintln(builder, "  xor %edx, %edx")
             fmt.sbprintln(builder, "  cmp $0, %eax")
             fmt.sbprintfln(builder, "  jge L%v", current_label)
@@ -1483,6 +1488,7 @@ emit_assign_op :: proc(builder: ^strings.Builder, op: ^Ast_Node, offsets: ^Scope
             emit_label(builder)
             fmt.sbprintln(builder, "  idiv %ebx")
             fmt.sbprintfln(builder, "  mov %%eax, %v", loc_asm)
+            fmt.sbprintfln(builder, "  pop %rdx")
 
         case Modulo_Equal_Node:
             validate_lvalue(offsets, o.left)
@@ -1490,6 +1496,7 @@ emit_assign_op :: proc(builder: ^strings.Builder, op: ^Ast_Node, offsets: ^Scope
             loc_asm := location_to_assembly(get_location(offsets, o.left.variant.(Ident_Node).var_name))
             fmt.sbprintln(builder, "  mov %eax, %ebx")
             fmt.sbprintfln(builder, "  mov %v, %%eax", loc_asm)
+            fmt.sbprintln(builder, "  push %rdx") // rdx could be a function parameter, so we need to save it
             fmt.sbprintln(builder, "  xor %edx, %edx")
             fmt.sbprintln(builder, "  cmp $0, %ebx")
             fmt.sbprintfln(builder, "  jge L%v", current_label)
@@ -1498,6 +1505,7 @@ emit_assign_op :: proc(builder: ^strings.Builder, op: ^Ast_Node, offsets: ^Scope
             fmt.sbprintln(builder, "  idiv %ebx")
             fmt.sbprintfln(builder, "  mov %%edx, %v", loc_asm)
             fmt.sbprintln(builder, "  mov %edx, %eax")
+            fmt.sbprintfln(builder, "  pop %rdx")
 
         case Xor_Equal_Node:
             validate_lvalue(offsets, o.left)
@@ -1642,7 +1650,7 @@ emit_expr :: proc(builder: ^strings.Builder, expr: ^Ast_Node, vars: ^Scoped_Vari
             }
             fmt.sbprintfln(builder, "  call %v", e.name)
             if len(e.args) > 4 {
-                fmt.sbprintfln(builder, "  add $%v, %%rsp", len(e.args[4:]))
+                fmt.sbprintfln(builder, "  add $%v, %%rsp", len(e.args[4:]) * 8)
             }
 
         case:
