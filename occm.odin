@@ -1225,14 +1225,16 @@ emit_binary_op :: proc(builder: ^strings.Builder, op: ^Ast_Node, vars: ^Scoped_V
             fmt.sbprintln(builder, "  push %rax")
             emit_expr(builder, o.right, vars, info)
             fmt.sbprintln(builder, "  pop %rbx")
+            fmt.sbprintln(builder, "  push %rdx") // rdx could be a function parameter, so we need to save it
             fmt.sbprintln(builder, "  imul %ebx")
+            fmt.sbprintln(builder, "  pop %rdx")
 
         case Modulo_Node:
             emit_expr(builder, o.left, vars, info)
             fmt.sbprintln(builder, "  push %rax")
             emit_expr(builder, o.right, vars, info)
             fmt.sbprintln(builder, "  pop %rbx")
-            fmt.sbprintln(builder, "  push %rcx") // rdx could be a function parameter, so we need to save it
+            fmt.sbprintln(builder, "  push %rcx") // rcx could be a function parameter, so we need to save it
             fmt.sbprintln(builder, "  push %rdx") // rdx could be a function parameter, so we need to save it
             fmt.sbprintln(builder, "  xor %edx, %edx")
             fmt.sbprintln(builder, "  cmp $0, %ebx")
@@ -1417,7 +1419,9 @@ emit_assign_op :: proc(builder: ^strings.Builder, op: ^Ast_Node, offsets: ^Scope
             validate_lvalue(offsets, o.left)
             emit_expr(builder, o.right, offsets, info)
             fmt.sbprintfln(builder, "  mov %v(%%rbp), %%ebx", get_offset(offsets, o.left.variant.(Ident_Node).var_name))
+            fmt.sbprintln(builder, "  push %rdx") // rdx could be a function parameter, so we need to save it
             fmt.sbprintln(builder, "  imul %ebx, %eax")
+            fmt.sbprintln(builder, "  pop %rdx")
             fmt.sbprintfln(builder, "  mov %%eax, %v(%%rbp)", get_offset(offsets, o.left.variant.(Ident_Node).var_name))
 
         case Divide_Equal_Node:
