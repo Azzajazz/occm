@@ -7,6 +7,6 @@ int fib(int n) {
 }
 
 int main(void) {
-    int n = 6;
+    int n = 2;
     return fib(n);
 }
