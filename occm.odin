@@ -1112,9 +1112,9 @@ location_to_assembly :: proc(location: Location) -> string {
         case .Rdx:
             return "%edx"
         case .R8:
-            return "%e8"
+            return "%r8d"
         case .R9:
-            return "%e9"
+            return "%r9d"
         case .Stack:
             // @LEAK: This will probably never be freed
             return fmt.aprintf("%v(%%rbp)", location.offset)
