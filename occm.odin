@@ -1092,18 +1092,60 @@ validate_and_gather_function_labels :: proc(function: Function_Definition_Node) 
     return labels
 }
 
-get_offset :: proc(offsets: ^Scoped_Variable_Offsets, var_name: string) -> int {
+Location_Type :: enum {
+    Rcx,
+    Rdx,
+    R8,
+    R9,
+    Stack,
+}
+
+Location :: struct {
+    type: Location_Type,
+    offset: int, // For stack locations only
+}
+
+location_to_assembly :: proc(location: Location) -> string {
+    switch location.type {
+        case .Rcx:
+            return "%ecx"
+        case .Rdx:
+            return "%edx"
+        case .R8:
+            return "%e8"
+        case .R9:
+            return "%e9"
+        case .Stack:
+            // @LEAK: This will probably never be freed
+            return fmt.aprintf("%v(%%rbp)", location.offset)
+    }
+
+    panic("Unreachable")
+}
+
+get_location :: proc(offsets: ^Scoped_Variable_Offsets, var_name: string) -> Location {
+    if offsets.rcx == var_name do return Location{.Rcx, 0}
+    if offsets.rdx == var_name do return Location{.Rdx, 0}
+    if offsets.r8 == var_name do return Location{.R8, 0}
+    if offsets.r9 == var_name do return Location{.R9, 0}
+
     offset, ok := offsets.var_offsets[var_name]
     if ok {
-        return offset
+        return Location{.Stack, offset}
     }
     else {
-        return get_offset(offsets.parent, var_name)
+        return get_location(offsets.parent, var_name)
     }
 }
 
 is_defined :: proc(offsets: ^Scoped_Variable_Offsets, var_name: string) -> bool {
-    if offsets.parent == nil do return var_name in offsets.var_offsets
+    if offsets.parent == nil {
+        return var_name in offsets.var_offsets \
+            || offsets.rcx == var_name \
+            || offsets.rdx == var_name \
+            || offsets.r8 == var_name \
+            || offsets.r9 == var_name
+    }
 
     if var_name in offsets.var_offsets \
         || offsets.rcx == var_name \
@@ -1183,23 +1225,27 @@ emit_unary_op :: proc(builder: ^strings.Builder, op: ^Ast_Node, offsets: ^Scoped
 
         case Pre_Decrement_Node:
             validate_lvalue(offsets, o.expr)
-            fmt.sbprintfln(builder, "  decl %v(%%rbp)", get_offset(offsets, o.expr.variant.(Ident_Node).var_name))
-            fmt.sbprintfln(builder, "  mov %v(%%rbp), %%eax", get_offset(offsets, o.expr.variant.(Ident_Node).var_name))
+            loc_asm := location_to_assembly(get_location(offsets, o.expr.variant.(Ident_Node).var_name))
+            fmt.sbprintfln(builder, "  decl %v", loc_asm)
+            fmt.sbprintfln(builder, "  mov %v, %%eax", loc_asm)
 
         case Pre_Increment_Node:
             validate_lvalue(offsets, o.expr)
-            fmt.sbprintfln(builder, "  incl %v(%%rbp)", get_offset(offsets, o.expr.variant.(Ident_Node).var_name))
-            fmt.sbprintfln(builder, "  mov %v(%%rbp), %%eax", get_offset(offsets, o.expr.variant.(Ident_Node).var_name))
+            loc_asm := location_to_assembly(get_location(offsets, o.expr.variant.(Ident_Node).var_name))
+            fmt.sbprintfln(builder, "  incl %v", loc_asm)
+            fmt.sbprintfln(builder, "  mov %v, %%eax", loc_asm)
 
         case Post_Decrement_Node:
             validate_lvalue(offsets, o.expr)
-            fmt.sbprintfln(builder, "  mov %v(%%rbp), %%eax", get_offset(offsets, o.expr.variant.(Ident_Node).var_name))
-            fmt.sbprintfln(builder, "  decl %v(%%rbp)", get_offset(offsets, o.expr.variant.(Ident_Node).var_name))
+            loc_asm := location_to_assembly(get_location(offsets, o.expr.variant.(Ident_Node).var_name))
+            fmt.sbprintfln(builder, "  mov %v, %%eax", loc_asm)
+            fmt.sbprintfln(builder, "  decl %v", loc_asm)
 
         case Post_Increment_Node:
             validate_lvalue(offsets, o.expr)
-            fmt.sbprintfln(builder, "  mov %v(%%rbp), %%eax", get_offset(offsets, o.expr.variant.(Ident_Node).var_name))
-            fmt.sbprintfln(builder, "  incl %v(%%rbp)", get_offset(offsets, o.expr.variant.(Ident_Node).var_name))
+            loc_asm := location_to_assembly(get_location(offsets, o.expr.variant.(Ident_Node).var_name))
+            fmt.sbprintfln(builder, "  mov %v, %%eax", loc_asm)
+            fmt.sbprintfln(builder, "  incl %v", loc_asm)
 
         case:
             fmt.println(op)
@@ -1396,93 +1442,104 @@ emit_assign_op :: proc(builder: ^strings.Builder, op: ^Ast_Node, offsets: ^Scope
         case Equal_Node:
             validate_lvalue(offsets, o.left)
             emit_expr(builder, o.right, offsets, info)
-            fmt.sbprintfln(builder, "  mov %%eax, %v(%%rbp)", get_offset(offsets, o.left.variant.(Ident_Node).var_name))
+            loc_asm := location_to_assembly(get_location(offsets, o.left.variant.(Ident_Node).var_name))
+            fmt.sbprintfln(builder, "  mov %%eax, %v", loc_asm) 
 
         case Plus_Equal_Node:
             validate_lvalue(offsets, o.left)
             emit_expr(builder, o.right, offsets, info)
-            fmt.sbprintfln(builder, "  mov %v(%%rbp), %%ebx", get_offset(offsets, o.left.variant.(Ident_Node).var_name))
+            loc_asm := location_to_assembly(get_location(offsets, o.left.variant.(Ident_Node).var_name))
+            fmt.sbprintfln(builder, "  mov %v, %%ebx", loc_asm)
             fmt.sbprintln(builder, "  add %ebx, %eax")
-            fmt.sbprintfln(builder, "  mov %%eax, %v(%%rbp)", get_offset(offsets, o.left.variant.(Ident_Node).var_name))
+            fmt.sbprintfln(builder, "  mov %%eax, %v", loc_asm)
             
         case Minus_Equal_Node:
             validate_lvalue(offsets, o.left)
             emit_expr(builder, o.right, offsets, info)
+            loc_asm := location_to_assembly(get_location(offsets, o.left.variant.(Ident_Node).var_name))
             fmt.sbprintln(builder, "  mov %eax, %ebx")
-            fmt.sbprintfln(builder, "  mov %v(%%rbp), %%eax", get_offset(offsets, o.left.variant.(Ident_Node).var_name))
+            fmt.sbprintfln(builder, "  mov %v, %%eax", loc_asm)
             fmt.sbprintln(builder, "  sub %ebx, %eax")
-            fmt.sbprintfln(builder, "  mov %%eax, %v(%%rbp)", get_offset(offsets, o.left.variant.(Ident_Node).var_name))
+            fmt.sbprintfln(builder, "  mov %%eax, %v", loc_asm)
 
         case Times_Equal_Node:
             validate_lvalue(offsets, o.left)
             emit_expr(builder, o.right, offsets, info)
-            fmt.sbprintfln(builder, "  mov %v(%%rbp), %%ebx", get_offset(offsets, o.left.variant.(Ident_Node).var_name))
+            loc_asm := location_to_assembly(get_location(offsets, o.left.variant.(Ident_Node).var_name))
+            fmt.sbprintfln(builder, "  mov %v, %%ebx", loc_asm)
             fmt.sbprintln(builder, "  imul %ebx, %eax")
-            fmt.sbprintfln(builder, "  mov %%eax, %v(%%rbp)", get_offset(offsets, o.left.variant.(Ident_Node).var_name))
+            fmt.sbprintfln(builder, "  mov %%eax, %v", loc_asm)
 
         case Divide_Equal_Node:
             validate_lvalue(offsets, o.left)
             emit_expr(builder, o.right, offsets, info)
+            loc_asm := location_to_assembly(get_location(offsets, o.left.variant.(Ident_Node).var_name))
             fmt.sbprintln(builder, "  mov %eax, %ebx")
-            fmt.sbprintfln(builder, "  mov %v(%%rbp), %%eax", get_offset(offsets, o.left.variant.(Ident_Node).var_name))
+            fmt.sbprintfln(builder, "  mov %v, %%eax", loc_asm)
             fmt.sbprintln(builder, "  xor %edx, %edx")
             fmt.sbprintln(builder, "  cmp $0, %eax")
             fmt.sbprintfln(builder, "  jge L%v", current_label)
             fmt.sbprintln(builder, "  dec %edx")
             emit_label(builder)
             fmt.sbprintln(builder, "  idiv %ebx")
-            fmt.sbprintfln(builder, "  mov %%eax, %v(%%rbp)", get_offset(offsets, o.left.variant.(Ident_Node).var_name))
+            fmt.sbprintfln(builder, "  mov %%eax, %v", loc_asm)
 
         case Modulo_Equal_Node:
             validate_lvalue(offsets, o.left)
             emit_expr(builder, o.right, offsets, info)
+            loc_asm := location_to_assembly(get_location(offsets, o.left.variant.(Ident_Node).var_name))
             fmt.sbprintln(builder, "  mov %eax, %ebx")
-            fmt.sbprintfln(builder, "  mov %v(%%rbp), %%eax", get_offset(offsets, o.left.variant.(Ident_Node).var_name))
+            fmt.sbprintfln(builder, "  mov %v, %%eax", loc_asm)
             fmt.sbprintln(builder, "  xor %edx, %edx")
             fmt.sbprintln(builder, "  cmp $0, %ebx")
             fmt.sbprintfln(builder, "  jge L%v", current_label)
             fmt.sbprintln(builder, "  dec %edx")
             emit_label(builder)
             fmt.sbprintln(builder, "  idiv %ebx")
-            fmt.sbprintfln(builder, "  mov %%edx, %v(%%rbp)", get_offset(offsets, o.left.variant.(Ident_Node).var_name))
+            fmt.sbprintfln(builder, "  mov %%edx, %v", loc_asm)
             fmt.sbprintln(builder, "  mov %edx, %eax")
 
         case Xor_Equal_Node:
             validate_lvalue(offsets, o.left)
             emit_expr(builder, o.right, offsets, info)
-            fmt.sbprintfln(builder, "  mov %v(%%rbp), %%ebx", get_offset(offsets, o.left.variant.(Ident_Node).var_name))
+            loc_asm := location_to_assembly(get_location(offsets, o.left.variant.(Ident_Node).var_name))
+            fmt.sbprintfln(builder, "  mov %v, %%ebx", loc_asm)
             fmt.sbprintln(builder, "  xor %ebx, %eax")
-            fmt.sbprintfln(builder, "  mov %%eax, %v(%%rbp)", get_offset(offsets, o.left.variant.(Ident_Node).var_name))
+            fmt.sbprintfln(builder, "  mov %%eax, %v", loc_asm)
 
         case Or_Equal_Node:
             validate_lvalue(offsets, o.left)
             emit_expr(builder, o.right, offsets, info)
-            fmt.sbprintfln(builder, "  mov %v(%%rbp), %%ebx", get_offset(offsets, o.left.variant.(Ident_Node).var_name))
+            loc_asm := location_to_assembly(get_location(offsets, o.left.variant.(Ident_Node).var_name))
+            fmt.sbprintfln(builder, "  mov %v, %%ebx", loc_asm)
             fmt.sbprintln(builder, "  or %ebx, %eax")
-            fmt.sbprintfln(builder, "  mov %%eax, %v(%%rbp)", get_offset(offsets, o.left.variant.(Ident_Node).var_name))
+            fmt.sbprintfln(builder, "  mov %%eax, %v", loc_asm)
 
         case And_Equal_Node:
             validate_lvalue(offsets, o.left)
             emit_expr(builder, o.right, offsets, info)
-            fmt.sbprintfln(builder, "  mov %v(%%rbp), %%ebx", get_offset(offsets, o.left.variant.(Ident_Node).var_name))
+            loc_asm := location_to_assembly(get_location(offsets, o.left.variant.(Ident_Node).var_name))
+            fmt.sbprintfln(builder, "  mov %v, %%ebx", loc_asm)
             fmt.sbprintln(builder, "  and %ebx, %eax")
-            fmt.sbprintfln(builder, "  mov %%eax, %v(%%rbp)", get_offset(offsets, o.left.variant.(Ident_Node).var_name))
+            fmt.sbprintfln(builder, "  mov %%eax, %v", loc_asm)
 
         case Shift_Left_Equal_Node:
             validate_lvalue(offsets, o.left)
             emit_expr(builder, o.right, offsets, info)
+            loc_asm := location_to_assembly(get_location(offsets, o.left.variant.(Ident_Node).var_name))
             fmt.sbprintln(builder, "  mov %eax, %ecx")
-            fmt.sbprintfln(builder, "  mov %v(%%rbp), %%eax", get_offset(offsets, o.left.variant.(Ident_Node).var_name))
+            fmt.sbprintfln(builder, "  mov %v, %%eax", loc_asm)
             fmt.sbprintln(builder, "  shl %cl, %eax")
-            fmt.sbprintfln(builder, "  mov %%eax, %v(%%rbp)", get_offset(offsets, o.left.variant.(Ident_Node).var_name))
+            fmt.sbprintfln(builder, "  mov %%eax, %v", loc_asm)
 
         case Shift_Right_Equal_Node:
             validate_lvalue(offsets, o.left)
             emit_expr(builder, o.right, offsets, info)
+            loc_asm := location_to_assembly(get_location(offsets, o.left.variant.(Ident_Node).var_name))
             fmt.sbprintln(builder, "  mov %eax, %ecx")
-            fmt.sbprintfln(builder, "  mov %v(%%rbp), %%eax", get_offset(offsets, o.left.variant.(Ident_Node).var_name))
+            fmt.sbprintfln(builder, "  mov %v, %%eax", loc_asm)
             fmt.sbprintln(builder, "  shr %cl, %eax")
-            fmt.sbprintfln(builder, "  mov %%eax, %v(%%rbp)", get_offset(offsets, o.left.variant.(Ident_Node).var_name))
+            fmt.sbprintfln(builder, "  mov %%eax, %v", loc_asm)
 
         case:
             fmt.println(op)
@@ -1496,8 +1553,11 @@ emit_expr :: proc(builder: ^strings.Builder, expr: ^Ast_Node, vars: ^Scoped_Vari
             fmt.sbprintfln(builder, "  mov $%v, %%eax", e.value)
 
         case Ident_Node:
+            // print_scoped_variable_offsets(vars^)
             if !is_defined(vars, e.var_name) do semantic_error()
-            fmt.sbprintfln(builder, "  mov %v(%%rbp), %%eax", get_offset(vars, e.var_name))
+            loc_asm := location_to_assembly(get_location(vars, e.var_name))
+            fmt.printfln("LOC_ASM = %v", loc_asm)
+            fmt.sbprintfln(builder, "  mov %v, %%eax", loc_asm)
 
         case Negate_Node: emit_unary_op(builder, expr, vars, info)
         case Bit_Negate_Node: emit_unary_op(builder, expr, vars, info)
@@ -1598,7 +1658,8 @@ emit_block_statement :: proc(builder: ^strings.Builder, block_statement: ^Ast_No
             offsets.var_offsets[stmt.var_name] = info.variable_offset
             info.variable_offset -= 8
             emit_expr(builder, stmt.right, offsets, info)
-            fmt.sbprintfln(builder, "  mov %%eax, %v(%%rbp)", get_offset(offsets, stmt.var_name))
+            loc_asm := location_to_assembly(get_location(offsets, stmt.var_name))
+            fmt.sbprintfln(builder, "  mov %%eax, %v", loc_asm)
 
         case Decl_Node: // Space on the stack is already allocated by emit_function
             if stmt.var_name in offsets.var_offsets do semantic_error()
@@ -1786,6 +1847,29 @@ make_scoped_variable_offsets :: proc(parent: ^Scoped_Variable_Offsets) -> ^Scope
     return vars
 }
 
+print_scoped_variable_offsets :: proc(offsets: Scoped_Variable_Offsets) {
+    fmt.println(offsets)
+    for var, off in offsets.var_offsets {
+        fmt.printfln("%v: %v", var, off)
+    }
+    if offsets.rcx != "" {
+        fmt.printfln("%v: rcx", offsets.rcx)
+    }
+    if offsets.rdx != "" {
+        fmt.printfln("%v: rdx", offsets.rdx)
+    }
+    if offsets.r8 != "" {
+        fmt.printfln("%v: r8", offsets.r8)
+    }
+    if offsets.r9 != "" {
+        fmt.printfln("%v: r9", offsets.r9)
+    }
+
+    if offsets.parent != nil {
+        print_scoped_variable_offsets(offsets.parent^)
+    }
+}
+
 count_function_variable_declarations :: proc(function: Function_Definition_Node) -> int {
     declarations := 0
 
@@ -1904,13 +1988,13 @@ emit_function :: proc(builder: ^strings.Builder, function: Function_Definition_N
         offsets.rcx = function.params[0]
     }
     if len(function.params) > 1 {
-        offsets.rcx = function.params[1]
+        offsets.rdx = function.params[1]
     }
     if len(function.params) > 2 {
-        offsets.rcx = function.params[2]
+        offsets.r8 = function.params[2]
     }
     if len(function.params) > 3 {
-        offsets.rcx = function.params[3]
+        offsets.r9 = function.params[3]
     }
     if len(function.params) > 4 {
         #reverse for param, i in function.params[4:] {
