@@ -1874,41 +1874,36 @@ emit_function :: proc(builder: ^strings.Builder, function: Function_Definition_N
     fmt.sbprintln(builder, "  push %rbp")
     fmt.sbprintln(builder, "  mov %rsp, %rbp")
 
-    rsp_decrement := count_function_variable_declarations(function) * 8
-    if rsp_decrement > 0 {
-        fmt.sbprintfln(builder, "  sub $%v, %%rsp", rsp_decrement)
-    }
+    // Function parameters follow the x64 calling convention
+    // "Note that space is always allocated for the register parameters, even if the parameters themselves are never homed to the stack;
+    // a callee is guaranteed that space has been allocated for all its parameters."
+    rsp_decrement := count_function_variable_declarations(function) * 8 + 32 // 32 = 8 * 4 is the space for the register variables
+    fmt.sbprintfln(builder, "  sub $%v, %%rsp", rsp_decrement)
 
     info := Emit_Info{
         labels = labels[:],
         loop_labels = make([dynamic]Loop_Labels),
-        variable_offset = -8,
+        variable_offset = -40, // Just after the register variables
         switch_infos = make([dynamic]Switch_Info),
         containing_control_flows = make([dynamic]Containing_Control_Flow)
     }
 
-    // Make a new Scoped_Variable_Offsets for the function local variables, including function parameters
-    // Function parameters follow the x64 calling convention
     offsets := make_scoped_variable_offsets(parent_offsets)
     if len(function.params) > 0 {
-        fmt.sbprintln(builder, "  push %rcx")
-        offsets.var_offsets[function.params[0]] = info.variable_offset
-        info.variable_offset -= 8
+        fmt.sbprintln(builder, "  mov %rcx, -8(%rbp)")
+        offsets.var_offsets[function.params[0]] = -8
     }
     if len(function.params) > 1 {
-        fmt.sbprintln(builder, "  push %rdx")
-        offsets.var_offsets[function.params[1]] = info.variable_offset
-        info.variable_offset -= 8
+        fmt.sbprintln(builder, "  mov %rdx, -16(%rbp)")
+        offsets.var_offsets[function.params[1]] = -16
     }
     if len(function.params) > 2 {
-        fmt.sbprintln(builder, "  push %r8")
-        offsets.var_offsets[function.params[2]] = info.variable_offset
-        info.variable_offset -= 8
+        fmt.sbprintln(builder, "  mov %r8, -24(%rbp)")
+        offsets.var_offsets[function.params[2]] = -24
     }
     if len(function.params) > 3 {
-        fmt.sbprintln(builder, "  push %r9")
-        offsets.var_offsets[function.params[3]] = info.variable_offset
-        info.variable_offset -= 8
+        fmt.sbprintln(builder, "  mov %r9, -32(%rbp)")
+        offsets.var_offsets[function.params[3]] = -32
     }
     if len(function.params) > 4 {
         #reverse for param, i in function.params[4:] {
@@ -1925,21 +1920,7 @@ emit_function :: proc(builder: ^strings.Builder, function: Function_Definition_N
     }
 
     fmt.sbprintfln(builder, "%v_done:", function.name)
-    if rsp_decrement > 0 {
-        fmt.sbprintfln(builder, "  add $%v, %%rsp", rsp_decrement)
-    }
-    if len(function.params) > 3 {
-        fmt.sbprintln(builder, "  pop %r9")
-    }
-    if len(function.params) > 2 {
-        fmt.sbprintln(builder, "  pop %r8")
-    }
-    if len(function.params) > 1 {
-        fmt.sbprintln(builder, "  pop %rdx")
-    }
-    if len(function.params) > 0 {
-        fmt.sbprintln(builder, "  pop %rcx")
-    }
+    fmt.sbprintfln(builder, "  add $%v, %%rsp", rsp_decrement)
       
     fmt.sbprintln(builder, "  pop %rbp")
     fmt.sbprintln(builder, "  ret")
