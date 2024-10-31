@@ -1105,11 +1105,7 @@ get_offset :: proc(offsets: ^Scoped_Variable_Offsets, var_name: string) -> int {
 is_defined :: proc(offsets: ^Scoped_Variable_Offsets, var_name: string) -> bool {
     if offsets.parent == nil do return var_name in offsets.var_offsets
 
-    if var_name in offsets.var_offsets \
-        || offsets.rcx == var_name \
-        || offsets.rdx == var_name \
-        || offsets.r8 == var_name \
-        || offsets.r9 == var_name {
+    if var_name in offsets.var_offsets {
         return true
     }
     else {
@@ -1236,6 +1232,7 @@ emit_binary_op :: proc(builder: ^strings.Builder, op: ^Ast_Node, vars: ^Scoped_V
             fmt.sbprintln(builder, "  push %rax")
             emit_expr(builder, o.right, vars, info)
             fmt.sbprintln(builder, "  pop %rbx")
+            fmt.sbprintln(builder, "  push %rcx") // rdx could be a function parameter, so we need to save it
             fmt.sbprintln(builder, "  push %rdx") // rdx could be a function parameter, so we need to save it
             fmt.sbprintln(builder, "  xor %edx, %edx")
             fmt.sbprintln(builder, "  cmp $0, %ebx")
@@ -1247,12 +1244,14 @@ emit_binary_op :: proc(builder: ^strings.Builder, op: ^Ast_Node, vars: ^Scoped_V
             fmt.sbprintln(builder, "  idiv %ecx")
             fmt.sbprintln(builder, "  mov %edx, %eax")
             fmt.sbprintln(builder, "  pop %rdx")
+            fmt.sbprintln(builder, "  pop %rcx")
 
         case Divide_Node:
             emit_expr(builder, o.left, vars, info)
             fmt.sbprintln(builder, "  push %rax")
             emit_expr(builder, o.right, vars, info)
             fmt.sbprintln(builder, "  pop %rbx")
+            fmt.sbprintln(builder, "  push %rcx") // rcx could be a function parameter, so we need to save it
             fmt.sbprintln(builder, "  push %rdx") // rdx could be a function parameter, so we need to save it
             fmt.sbprintln(builder, "  xor %edx, %edx")
             fmt.sbprintln(builder, "  cmp $0, %ebx")
@@ -1263,6 +1262,7 @@ emit_binary_op :: proc(builder: ^strings.Builder, op: ^Ast_Node, vars: ^Scoped_V
             fmt.sbprintln(builder, "  mov %ebx, %eax")
             fmt.sbprintln(builder, "  idiv %ecx")
             fmt.sbprintln(builder, "  pop %rdx")
+            fmt.sbprintln(builder, "  pop %rcx")
 
         case Boolean_And_Node:
             emit_expr(builder, o.left, vars, info)
@@ -1582,7 +1582,7 @@ emit_expr :: proc(builder: ^strings.Builder, expr: ^Ast_Node, vars: ^Scoped_Vari
             }
             fmt.sbprintfln(builder, "  call %v", e.name)
             if len(e.args) > 4 {
-                fmt.sbprintfln(builder, "  add $%v, %%rsp", len(e.args[4:]))
+                fmt.sbprintfln(builder, "  add $%v, %%rsp", len(e.args[4:]) * 8)
             }
 
         case:
@@ -1767,22 +1767,12 @@ emit_statement :: proc(builder: ^strings.Builder, statement: ^Ast_Node, parent_o
 Scoped_Variable_Offsets :: struct {
     parent: ^Scoped_Variable_Offsets,
     var_offsets: map[string]int,
-
-    // For function parameters
-    rcx: string,
-    rdx: string,
-    r8: string,
-    r9: string,
 }
 
 make_scoped_variable_offsets :: proc(parent: ^Scoped_Variable_Offsets) -> ^Scoped_Variable_Offsets {
     vars := new(Scoped_Variable_Offsets)
     vars.parent = parent
     vars.var_offsets = make(map[string]int)
-    vars.rcx = ""
-    vars.rdx = ""
-    vars.r8 = ""
-    vars.r9 = ""
     return vars
 }
 
@@ -1901,16 +1891,24 @@ emit_function :: proc(builder: ^strings.Builder, function: Function_Definition_N
     // Function parameters follow the x64 calling convention
     offsets := make_scoped_variable_offsets(parent_offsets)
     if len(function.params) > 0 {
-        offsets.rcx = function.params[0]
+        fmt.sbprintln(builder, "  push %rcx")
+        offsets.var_offsets[function.params[0]] = info.variable_offset
+        info.variable_offset -= 8
     }
     if len(function.params) > 1 {
-        offsets.rcx = function.params[1]
+        fmt.sbprintln(builder, "  push %rdx")
+        offsets.var_offsets[function.params[1]] = info.variable_offset
+        info.variable_offset -= 8
     }
     if len(function.params) > 2 {
-        offsets.rcx = function.params[2]
+        fmt.sbprintln(builder, "  push %r8")
+        offsets.var_offsets[function.params[2]] = info.variable_offset
+        info.variable_offset -= 8
     }
     if len(function.params) > 3 {
-        offsets.rcx = function.params[3]
+        fmt.sbprintln(builder, "  push %r9")
+        offsets.var_offsets[function.params[3]] = info.variable_offset
+        info.variable_offset -= 8
     }
     if len(function.params) > 4 {
         #reverse for param, i in function.params[4:] {
@@ -1930,6 +1928,19 @@ emit_function :: proc(builder: ^strings.Builder, function: Function_Definition_N
     if rsp_decrement > 0 {
         fmt.sbprintfln(builder, "  add $%v, %%rsp", rsp_decrement)
     }
+    if len(function.params) > 3 {
+        fmt.sbprintln(builder, "  pop %r9")
+    }
+    if len(function.params) > 2 {
+        fmt.sbprintln(builder, "  pop %r8")
+    }
+    if len(function.params) > 1 {
+        fmt.sbprintln(builder, "  pop %rdx")
+    }
+    if len(function.params) > 0 {
+        fmt.sbprintln(builder, "  pop %rcx")
+    }
+      
     fmt.sbprintln(builder, "  pop %rbp")
     fmt.sbprintln(builder, "  ret")
 }
