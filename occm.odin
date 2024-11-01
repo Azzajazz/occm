@@ -491,6 +491,9 @@ parse_expression_leaf :: proc(tokens: []Token) -> (^Ast_Node, []Token) {
                         append(&params, expr)
                     }
                 }
+                else {
+                    tokens = tokens[1:]
+                }
 
                 return make_node_2(Function_Call_Node, name, params), tokens
             }
