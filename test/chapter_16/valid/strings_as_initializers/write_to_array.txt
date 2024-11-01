@@ -1,1 +1,2 @@
 exit_code: 0
+stdout: b'abc\r\nabx\r\nHello\r\nWorld\r\nJello\r\n'

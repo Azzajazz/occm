@@ -1,1 +1,2 @@
 exit_code: 0
+stdout: b'zero\r\nmn\r\nop\r\nwx\r\nyz\r\nBCD\r\nCDE\r\nDEF\r\nEFG\r\nbcd\r\ncde\r\n'

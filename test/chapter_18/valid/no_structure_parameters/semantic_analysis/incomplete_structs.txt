@@ -1,1 +1,2 @@
 exit_code: 0
+stdout: b"I'm a struct!\r\n"

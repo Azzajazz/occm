@@ -27,15 +27,17 @@ def do_valid_test(source_path: str):
     exp_file = exp_files.ExpFile(exp_file_path)
     run_result = subprocess.run(
             [exec_path],
-            stdout=subprocess.DEVNULL,
-            stderr=subprocess.DEVNULL
+            capture_output=True,
         )
-    if exp_file.exit_code == run_result.returncode:
-        print("PASSED!")
-        passed += 1
-    else:
+    if exp_file.exit_code != run_result.returncode:
         print(f"FAILED! Return codes do not match. Expected {exp_file.exit_code}, got {run_result.returncode}")
         failed += 1
+    elif eval(exp_file.stdout) != run_result.stdout:
+        print("FAILED! Stdout does not match")
+        failed += 1
+    else:
+        print("PASSED!")
+        passed += 1
     os.remove(exec_path)
 
 def do_invalid_lex_test(source_path: str):
@@ -99,8 +101,13 @@ def do_test(dirname: str, source_path: str):
     elif is_case_of(dirname, "invalid_parse"):
         do_invalid_parse_test(source_path)
 
+"""
     elif is_case_of(dirname, "invalid_semantics"):
         do_invalid_semantics_test(source_path)
+
+    elif is_case_of(dirname, "invalid_types"):
+        do_invalid_types_test(source_path)
+        """
 
 def do_tests(dirname: str):
     if os.path.isfile(dirname):

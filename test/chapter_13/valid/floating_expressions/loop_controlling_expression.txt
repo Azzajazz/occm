@@ -1,1 +1,2 @@
 exit_code: 100
+stdout: b''

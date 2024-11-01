@@ -1,1 +1,2 @@
 exit_code: 22
+stdout: b''

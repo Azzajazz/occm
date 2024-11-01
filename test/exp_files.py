@@ -7,6 +7,8 @@ class ExpFile:
         for line in lines:
             if line.startswith("exit_code: "):
                 self.exit_code = int(line.strip("exit_code: "))
+            elif line.startswith("stdout: "):
+                self.stdout = line.strip("stdout: ")
 
 def exp_file_path_from_source_path(path: str) -> str:
     noext = os.path.splitext(path)[0]

@@ -8,11 +8,12 @@ def generate_exp_file_with_gcc(path: str):
     # @HACK: If we get here, we should always be able to compile. However, the current compilation strategy doesn't always succeed.
     if compile_result.returncode != 0:
         return
-    run_result = subprocess.run("a.exe")
+    run_result = subprocess.run("a.exe", capture_output=True)
     exp_file_path = exp_files.exp_file_path_from_source_path(path)
     print(f"Generating {exp_file_path}")
     with open(exp_file_path, "w") as f:
-        f.write(f"exit_code: {run_result.returncode}")
+        f.write(f"exit_code: {run_result.returncode}\n")
+        f.write(f"stdout: {run_result.stdout}")
     os.remove("a.exe")
 
 def main():

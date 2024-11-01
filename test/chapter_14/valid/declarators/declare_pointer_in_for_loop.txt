@@ -1,1 +1,2 @@
 exit_code: 5
+stdout: b''
