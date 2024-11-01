@@ -974,31 +974,12 @@ parse_block_statement_list :: proc(tokens: []Token) -> ([dynamic]^Ast_Node, []To
     return list, tokens
 }
 
-parse_function_arguments :: proc(tokens: []Token) -> ([dynamic]string, []Token) {
-    args := make([dynamic]string)
-    token, tokens := take_first_token(tokens)
-    if token.type == .IntKeyword {
-        token, tokens = take_first_token(tokens)
-        if token.type != .Ident do parse_error(token, tokens)
-        append(&args, token.text)
-        for token, tokens = take_first_token(tokens); token.type != .RParen; token, tokens = take_first_token(tokens) {
-            if token.type != .Comma do parse_error(token, tokens)
-            token, tokens = take_first_token(tokens)
-            if token.type != .IntKeyword do parse_error(token, tokens)
-            token, tokens = take_first_token(tokens)
-            if token.type != .Ident do parse_error(token, tokens)
-            append(&args, token.text)
-        }
-    }
-    else if token.type == .VoidKeyword {
-        token, tokens = take_first_token(tokens)
-        if token.type != .RParen do parse_error(token, tokens)
-    }
-
-    return args, tokens
+Function_Signature :: struct {
+    name: string,
+    params: [dynamic]string,
 }
 
-parse_function_definition_or_declaration :: proc(tokens: []Token) -> (^Ast_Node, []Token) {
+parse_function_signature :: proc(tokens: []Token) -> (Function_Signature, []Token) {
     tokens := tokens
     token: Token = ---
 
@@ -1011,12 +992,36 @@ parse_function_definition_or_declaration :: proc(tokens: []Token) -> (^Ast_Node,
 
     token, tokens = take_first_token(tokens)
     if token.type != .LParen do parse_error(token, tokens)
-    args: [dynamic]string
-    args, tokens = parse_function_arguments(tokens)
+    params := make([dynamic]string)
+    token, tokens = take_first_token(tokens)
+    if token.type == .IntKeyword {
+        token, tokens = take_first_token(tokens)
+        if token.type != .Ident do parse_error(token, tokens)
+        append(&params, token.text)
+        for token, tokens = take_first_token(tokens); token.type != .RParen; token, tokens = take_first_token(tokens) {
+            if token.type != .Comma do parse_error(token, tokens)
+            token, tokens = take_first_token(tokens)
+            if token.type != .IntKeyword do parse_error(token, tokens)
+            token, tokens = take_first_token(tokens)
+            if token.type != .Ident do parse_error(token, tokens)
+            append(&params, token.text)
+        }
+    }
+    else if token.type == .VoidKeyword {
+        token, tokens = take_first_token(tokens)
+        if token.type != .RParen do parse_error(token, tokens)
+    }
+    
+    return Function_Signature{name, params}, tokens
+}
 
+parse_function_definition_or_declaration :: proc(tokens: []Token) -> (^Ast_Node, []Token) {
+    signature, tokens := parse_function_signature(tokens)
+
+    token: Token = ---
     token, tokens = take_first_token(tokens)
     if token.type == .Semicolon {
-        return make_node_2(Function_Declaration_Node, name, args), tokens
+        return make_node_2(Function_Declaration_Node, signature.name, signature.params), tokens
     }
 
     if token.type != .LBrace do parse_error(token, tokens)
@@ -1024,7 +1029,7 @@ parse_function_definition_or_declaration :: proc(tokens: []Token) -> (^Ast_Node,
     body: [dynamic]^Ast_Node = ---
     body, tokens = parse_block_statement_list(tokens)
 
-    return make_node_3(Function_Definition_Node, name, args, body), tokens
+    return make_node_3(Function_Definition_Node, signature.name, signature.params, body), tokens
 }
 
 parse :: proc(tokens: []Token) -> Program {
