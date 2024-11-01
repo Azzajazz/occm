@@ -1015,6 +1015,28 @@ parse_function_signature :: proc(tokens: []Token) -> (Function_Signature, []Toke
     return Function_Signature{name, params}, tokens
 }
 
+parse_function_definition :: proc(tokens: []Token) -> (^Ast_Node, []Token) {
+    signature, tokens := parse_function_signature(tokens)
+
+    token: Token = ---
+    token, tokens = take_first_token(tokens)
+    if token.type != .LBrace do parse_error(token, tokens)
+
+    body: [dynamic]^Ast_Node = ---
+    body, tokens = parse_block_statement_list(tokens)
+
+    return make_node_3(Function_Definition_Node, signature.name, signature.params, body), tokens
+}
+
+parse_function_declaration :: proc(tokens: []Token) -> (^Ast_Node, []Token) {
+    signature, tokens := parse_function_signature(tokens)
+
+    token: Token = ---
+    token, tokens = take_first_token(tokens)
+    if token.type != .Semicolon do parse_error(token, tokens)
+    return make_node_2(Function_Declaration_Node, signature.name, signature.params), tokens
+}
+
 parse_function_definition_or_declaration :: proc(tokens: []Token) -> (^Ast_Node, []Token) {
     signature, tokens := parse_function_signature(tokens)
 
