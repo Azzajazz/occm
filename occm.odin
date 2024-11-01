@@ -1440,20 +1440,24 @@ emit_binary_op :: proc(builder: ^strings.Builder, op: ^Ast_Node, vars: ^Scoped_V
             fmt.sbprintln(builder, "  push %rax")
             emit_expr(builder, o.right, vars, info)
             fmt.sbprintln(builder, "  pop %rbx")
+            fmt.sbprintln(builder, "  push %rcx") // rcx may be a function parameter
             fmt.sbprintln(builder, "  mov %eax, %ecx")
             fmt.sbprintln(builder, "  mov %ebx, %eax")
             fmt.sbprintln(builder, "  shl %cl, %eax")
+            fmt.sbprintln(builder, "  pop %rcx")
 
         case Shift_Right_Node:
             emit_expr(builder, o.left, vars, info)
             fmt.sbprintln(builder, "  push %rax")
             emit_expr(builder, o.right, vars, info)
             fmt.sbprintln(builder, "  pop %rbx")
+            fmt.sbprintln(builder, "  push %rcx") // rcx may be a function parameter
             fmt.sbprintln(builder, "  mov %eax, %ecx")
             fmt.sbprintln(builder, "  mov %ebx, %eax")
             // @TODO: Whether this is a logical or arithmetic shift depends on the type of the left expression. Since we assume everything is a signed int for now,
             // we do an arithmetic shift right.
             fmt.sbprintln(builder, "  sar %cl, %eax")
+            fmt.sbprintln(builder, "  pop %rcx")
 
         case:
             fmt.println(op)
@@ -1543,17 +1547,21 @@ emit_assign_op :: proc(builder: ^strings.Builder, op: ^Ast_Node, offsets: ^Scope
         case Shift_Left_Equal_Node:
             validate_lvalue(offsets, o.left)
             emit_expr(builder, o.right, offsets, info)
+            fmt.sbprintln(builder, "  push %rcx") // rcx could be a function parameter, so we need to save it
             fmt.sbprintln(builder, "  mov %eax, %ecx")
             fmt.sbprintfln(builder, "  mov %v(%%rbp), %%eax", get_offset(offsets, o.left.variant.(Ident_Node).var_name))
             fmt.sbprintln(builder, "  shl %cl, %eax")
+            fmt.sbprintln(builder, "  pop %rcx")
             fmt.sbprintfln(builder, "  mov %%eax, %v(%%rbp)", get_offset(offsets, o.left.variant.(Ident_Node).var_name))
 
         case Shift_Right_Equal_Node:
             validate_lvalue(offsets, o.left)
             emit_expr(builder, o.right, offsets, info)
+            fmt.sbprintln(builder, "  push %rcx") // rcx could be a function parameter, so we need to save it
             fmt.sbprintln(builder, "  mov %eax, %ecx")
             fmt.sbprintfln(builder, "  mov %v(%%rbp), %%eax", get_offset(offsets, o.left.variant.(Ident_Node).var_name))
             fmt.sbprintln(builder, "  shr %cl, %eax")
+            fmt.sbprintln(builder, "  pop %rcx")
             fmt.sbprintfln(builder, "  mov %%eax, %v(%%rbp)", get_offset(offsets, o.left.variant.(Ident_Node).var_name))
 
         case:
@@ -1689,7 +1697,7 @@ emit_statement :: proc(builder: ^strings.Builder, statement: ^Ast_Node, parent_o
     for label in statement.labels {
         switch l in label {
             case string:
-                fmt.sbprintfln(builder, "_%v:", l)
+                fmt.sbprintfln(builder, "_%v_%v:", l, function_name)
             case int, Default_Label:
                 if len(info.switch_infos) == 0 do semantic_error()
                 switch_info := slice.last_ptr(info.switch_infos[:])
@@ -1794,10 +1802,8 @@ emit_statement :: proc(builder: ^strings.Builder, statement: ^Ast_Node, parent_o
             }
 
         case Goto_Node:
-            fmt.println(info)
-            fmt.println(info.labels)
             if !contains(cast(Label)stmt.label, info.labels) do semantic_error()
-            fmt.sbprintfln(builder, "  jmp _%v", stmt.label)
+            fmt.sbprintfln(builder, "  jmp _%v_%v", stmt.label, function_name)
 
         case Switch_Node:
             switch_info := get_switch_info(stmt, info)
@@ -1806,7 +1812,6 @@ emit_statement :: proc(builder: ^strings.Builder, statement: ^Ast_Node, parent_o
             current_label = switch_end_label(switch_info) + 1
 
             emit_expr(builder, stmt.expr, parent_offsets, info)
-            fmt.println(switch_info)
             for label, i in switch_info.labels {
                 switch l in label {
                     case int:
