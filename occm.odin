@@ -974,21 +974,9 @@ parse_block_statement_list :: proc(tokens: []Token) -> ([dynamic]^Ast_Node, []To
     return list, tokens
 }
 
-parse_function_definition_or_declaration :: proc(tokens: []Token) -> (^Ast_Node, []Token) {
-    tokens := tokens
-    token: Token = ---
-
-    token, tokens = take_first_token(tokens)
-    if token.type != .IntKeyword do parse_error(token, tokens)
-
-    token, tokens = take_first_token(tokens)
-    if token.type != .Ident do parse_error(token, tokens)
-    name := token.text
-
-    token, tokens = take_first_token(tokens)
-    if token.type != .LParen do parse_error(token, tokens)
+parse_function_arguments :: proc(tokens: []Token) -> ([dynamic]string, []Token) {
     args := make([dynamic]string)
-    token, tokens = take_first_token(tokens)
+    token, tokens := take_first_token(tokens)
     if token.type == .IntKeyword {
         token, tokens = take_first_token(tokens)
         if token.type != .Ident do parse_error(token, tokens)
@@ -1006,9 +994,25 @@ parse_function_definition_or_declaration :: proc(tokens: []Token) -> (^Ast_Node,
         token, tokens = take_first_token(tokens)
         if token.type != .RParen do parse_error(token, tokens)
     }
-    else {
-        parse_error(token, tokens)
-    }
+
+    return args, tokens
+}
+
+parse_function_definition_or_declaration :: proc(tokens: []Token) -> (^Ast_Node, []Token) {
+    tokens := tokens
+    token: Token = ---
+
+    token, tokens = take_first_token(tokens)
+    if token.type != .IntKeyword do parse_error(token, tokens)
+
+    token, tokens = take_first_token(tokens)
+    if token.type != .Ident do parse_error(token, tokens)
+    name := token.text
+
+    token, tokens = take_first_token(tokens)
+    if token.type != .LParen do parse_error(token, tokens)
+    args: [dynamic]string
+    args, tokens = parse_function_arguments(tokens)
 
     token, tokens = take_first_token(tokens)
     if token.type == .Semicolon {
