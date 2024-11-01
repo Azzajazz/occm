@@ -1697,7 +1697,7 @@ emit_statement :: proc(builder: ^strings.Builder, statement: ^Ast_Node, parent_o
     for label in statement.labels {
         switch l in label {
             case string:
-                fmt.sbprintfln(builder, "_%v_%v:", l, function_name)
+                fmt.sbprintfln(builder, "_%v@%v:", l, function_name)
             case int, Default_Label:
                 if len(info.switch_infos) == 0 do semantic_error()
                 switch_info := slice.last_ptr(info.switch_infos[:])
@@ -1803,7 +1803,7 @@ emit_statement :: proc(builder: ^strings.Builder, statement: ^Ast_Node, parent_o
 
         case Goto_Node:
             if !contains(cast(Label)stmt.label, info.labels) do semantic_error()
-            fmt.sbprintfln(builder, "  jmp _%v_%v", stmt.label, function_name)
+            fmt.sbprintfln(builder, "  jmp _%v@%v", stmt.label, function_name)
 
         case Switch_Node:
             switch_info := get_switch_info(stmt, info)
