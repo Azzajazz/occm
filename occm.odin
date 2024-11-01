@@ -769,6 +769,38 @@ parse_labels :: proc(tokens: []Token) -> ([dynamic]Label, []Token) {
     return labels, tokens
 }
 
+parse_for_precondition :: proc(tokens: []Token) -> (^Ast_Node, []Token) {
+    token := peek_first_token(tokens)
+
+    #partial switch token.type {
+        case .IntKeyword:
+            token_1 := peek_first_token(tokens[1:])
+            token_2 := peek_first_token(tokens[2:])
+            if token_1.type != .Ident do parse_error(token, tokens)
+            var_name := token_1.text
+
+            if token_2.type == .Semicolon {
+                statement := make_node_1(Decl_Node, var_name)
+                return statement, tokens[3:]
+            }
+            else if token_2.type == .Equal {
+                right, tokens := parse_expression(tokens[3:])
+                statement := make_node_2(Decl_Assign_Node, var_name, right)
+                token, tokens = take_first_token(tokens)
+                if token.type != .Semicolon do parse_error(token, tokens)
+                return statement, tokens
+            }
+            else {
+                parse_error(token, tokens)
+            }
+
+        case:
+            return parse_statement(tokens)
+    }
+    
+    panic("Unreachable")
+}
+
 parse_block_statement :: proc(tokens: []Token) -> (^Ast_Node, []Token) {
     labels, tokens := parse_labels(tokens)
     token := peek_first_token(tokens)
@@ -776,23 +808,25 @@ parse_block_statement :: proc(tokens: []Token) -> (^Ast_Node, []Token) {
     #partial switch token.type {
         case .IntKeyword:
             if len(labels) > 0 do parse_error(token, tokens)
-            token, tokens = take_first_token(tokens)
-            token, tokens = take_first_token(tokens)
-            if token.type != .Ident do parse_error(token, tokens)
-            var_name := token.text
-            token, tokens = take_first_token(tokens)
+            token_1 := peek_first_token(tokens[1:])
+            token_2 := peek_first_token(tokens[2:])
+            if token_1.type != .Ident do parse_error(token, tokens)
+            var_name := token_1.text
 
-            if token.type == .Semicolon {
+            if token_2.type == .Semicolon {
                 statement := make_node_1(Decl_Node, var_name)
-                return statement, tokens
+                return statement, tokens[3:]
             }
-            else if token.type == .Equal {
+            else if token_2.type == .Equal {
                 right: ^Ast_Node = ---
-                right, tokens = parse_expression(tokens)
+                right, tokens = parse_expression(tokens[3:])
                 statement := make_node_2(Decl_Assign_Node, var_name, right)
                 token, tokens = take_first_token(tokens)
                 if token.type != .Semicolon do parse_error(token, tokens)
                 return statement, tokens
+            }
+            else if token_2.type == .LParen {
+                return parse_function_declaration(tokens)
             }
             else {
                 parse_error(token, tokens)
@@ -888,7 +922,7 @@ parse_statement :: proc(tokens: []Token, labels: [dynamic]Label = nil) -> (^Ast_
             token, tokens = take_first_token(tokens)
             if token.type != .LParen do parse_error(token, tokens)
             pre_condition: ^Ast_Node = ---
-            pre_condition, tokens = parse_block_statement(tokens)
+            pre_condition, tokens = parse_for_precondition(tokens)
 
             condition: ^Ast_Node = ---
             token = peek_first_token(tokens)
