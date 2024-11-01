@@ -101,13 +101,8 @@ def do_test(dirname: str, source_path: str):
     elif is_case_of(dirname, "invalid_parse"):
         do_invalid_parse_test(source_path)
 
-"""
     elif is_case_of(dirname, "invalid_semantics"):
         do_invalid_semantics_test(source_path)
-
-    elif is_case_of(dirname, "invalid_types"):
-        do_invalid_types_test(source_path)
-        """
 
 def do_tests(dirname: str):
     if os.path.isfile(dirname):
@@ -143,7 +138,7 @@ def main():
     else:
         low = 1
         if args.low: low = int(args.low)
-        high = 18 
+        high = 20
         if args.high: high = int(args.high)
         for i in range(low, high + 1):
             do_tests(f"chapter_{i}")

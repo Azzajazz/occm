@@ -1,7 +1,18 @@
 import os
+import argparse
 import subprocess
 
 import exp_files
+
+def generate_exp_files_with_gcc(base_path: str):
+    if os.path.isfile(base_path):
+        generate_exp_file_with_gcc(base_path)
+    else:
+        for root, dirs, files in os.walk(base_path):
+            if "valid\\" in root:
+                for file in files:
+                    if file.endswith(".c"):
+                        generate_exp_file_with_gcc(os.path.join(root, file))
 
 def generate_exp_file_with_gcc(path: str):
     compile_result = subprocess.run(["gcc", "-O0", path])
@@ -17,11 +28,21 @@ def generate_exp_file_with_gcc(path: str):
     os.remove("a.exe")
 
 def main():
-    for root, dirs, files in os.walk("."):
-        if "valid\\" in root:
-            for file in files:
-                if file.endswith(".c"):
-                    generate_exp_file_with_gcc(os.path.join(root, file))
+    parser = argparse.ArgumentParser()
+    parser.add_argument("-path")
+    parser.add_argument("-high")
+    parser.add_argument("-low")
+    args = parser.parse_args()
+
+    if args.path:
+        generate_exp_files_with_gcc(args.path)
+    else:
+        low = 1
+        if args.low: low = args.low
+        high = 20
+        if args.high: high = args.high
+        for i in range(low, high + 1):
+            generate_exp_files_with_gcc(f"chapter_{i}")
 
 if __name__ == "__main__":
     main()
