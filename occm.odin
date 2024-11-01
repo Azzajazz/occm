@@ -1677,6 +1677,8 @@ emit_block_statement :: proc(builder: ^strings.Builder, block_statement: ^Ast_No
             offsets.var_offsets[stmt.var_name] = info.variable_offset
             info.variable_offset -= 8
 
+        case Function_Declaration_Node: // Do nothing
+
         case:
             emit_statement(builder, block_statement, offsets, info, function_name)
     }
