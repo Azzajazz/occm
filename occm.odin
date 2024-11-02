@@ -6,10 +6,12 @@ import "core:os"
 import "core:strconv"
 import "core:slice"
 import path "core:path/filepath"
+import "core:container/queue"
 
 LOG :: #config(LOG, false)
 
 Token_Type :: enum {
+    EndOfFile,
     LParen,
     RParen,
     LBrace,
@@ -43,6 +45,7 @@ Token_Type :: enum {
     PlusEqual, // +=
     MinusEqual, // -=
     StarEqual, // *=
+    Slash,
     SlashEqual, // /=
     PercentEqual, // %=
     CaratEqual, // ^=
@@ -76,50 +79,254 @@ Token :: struct {
     type: Token_Type,
     text: string,
     data: Token_Data,
+
+    // For lexical error messages
+    line: int,
+    char: int,
 }
 
-lex_error :: proc(c: u8) {
-    fmt.printfln("Unexpected token: %c", c)
+CONSUMED_LEN :: 8
+Lexer :: struct {
+    code: string,
+    code_index: int,
+
+    // For lexical error messages
+    file: string,
+    line: int,
+    char: int,
+
+    // Queue of consumed tokens
+    // This is to avoid having to construct a temporary lexer when peeking tokens
+    consumed: [CONSUMED_LEN]Token,
+    consumed_head: int,
+    consumed_tail: int,
+}
+
+lexer_advance :: proc(lexer: ^Lexer) {
+    c := lexer.code[lexer.code_index]
+    lexer.code_index += 1
+    if c == '\n' {
+        lexer.line += 1
+        lexer.char = 0
+    }
+    else {
+        lexer.char += 1
+    }
+}
+
+lexer_eat_whitespace :: proc(lexer: ^Lexer) {
+    for lexer.code_index < len(lexer.code) && is_ascii_whitespace_byte(lexer.code[lexer.code_index]) {
+        lexer_advance(lexer)
+    }
+}
+
+lexer_eat_until_newline :: proc(lexer: ^Lexer) {
+    for lexer.code_index < len(lexer.code) && lexer.code[lexer.code_index] != '\n' {
+        lexer_advance(lexer)
+    }
+}
+
+lexer_eat_multiline_comment :: proc(lexer: ^Lexer) {
+    assert(lexer.code[lexer.code_index] == '/' && lexer.code[lexer.code_index + 1] == '*')
+    lexer_advance(lexer)
+    lexer_advance(lexer)
+
+    for lexer.code_index < len(lexer.code) - 1 \
+        && !(lexer.code[lexer.code_index] == '*' && lexer.code[lexer.code_index + 1] == '/') {
+        lexer_advance(lexer)
+    }
+
+    lexer_advance(lexer)
+    lexer_advance(lexer)
+}
+
+consumed_is_empty :: proc(lexer: ^Lexer) -> bool {
+    return lexer.consumed_head == lexer.consumed_tail
+}
+
+consumed_is_full :: proc(lexer: ^Lexer) -> bool {
+    return (lexer.consumed_head == 0 && lexer.consumed_tail == CONSUMED_LEN - 1) || lexer.consumed_tail == lexer.consumed_head - 1
+}
+
+push_to_consumed :: proc(lexer: ^Lexer, token: Token) {
+    assert(!consumed_is_full(lexer))
+    lexer.consumed[lexer.consumed_tail] = token
+    lexer.consumed_tail += 1
+    if lexer.consumed_tail >= CONSUMED_LEN do lexer.consumed_tail = 0
+}
+
+peek_from_consumed :: proc(lexer: ^Lexer) -> Token {
+    peek_index := lexer.consumed_tail - 1
+    if peek_index < 0 do peek_index = CONSUMED_LEN - 1
+    return lexer.consumed[peek_index]
+}
+
+pop_from_consumed :: proc(lexer: ^Lexer) -> Token {
+    assert(!consumed_is_empty(lexer))
+    token := lexer.consumed[lexer.consumed_head]
+    lexer.consumed_head += 1
+    if lexer.consumed_head >= CONSUMED_LEN do lexer.consumed_head = 0
+    return token
+}
+
+lex_error :: proc(lexer: ^Lexer) {
+    fmt.printfln("%v(%v:%v) Syntax error: Unexpected character %c", lexer.file, lexer.line, lexer.char, lexer.code[lexer.code_index])
     os.exit(2)
 }
 
-get_int_constant_token :: proc(input: string) -> (token: Token, rest: string) {
-    byte_index: int
+consume_int_constant_token :: proc(lexer: ^Lexer) {
+    assert(is_ascii_digit_byte(lexer.code[lexer.code_index]))
 
-    for byte_index = 0; byte_index < len(input); byte_index += 1 {
-        if !is_ascii_digit_byte(input[byte_index]) do break
+    start_index := lexer.code_index
+    for lexer.code_index < len(lexer.code) && is_ascii_digit_byte(lexer.code[lexer.code_index]) {
+        lexer_advance(lexer)
     }
 
-    if is_ascii_alpha_byte(input[byte_index]) do lex_error(input[byte_index])
 
-    data := strconv.atoi(input[:byte_index])
-    return Token{.IntConstant, input[:byte_index], data}, input[byte_index:]
+    if lexer.code_index < len(lexer.code) && is_ascii_alpha_byte(lexer.code[lexer.code_index]) {
+        lex_error(lexer)
+    }
+
+    text := lexer.code[start_index:lexer.code_index]
+    token := Token {
+        type = .IntConstant,
+        text = text,
+        data = strconv.atoi(text),
+        line = lexer.line,
+        char = lexer.char,
+    }
+    push_to_consumed(lexer, token)
 }
 
-get_keyword_or_ident_token :: proc(input: string) -> (token: Token, rest: string) {
-    assert(is_ident_start_byte(input[0]))
-    byte_index := 1
+consume_keyword_or_ident_token :: proc(lexer: ^Lexer) {
+    assert(is_ident_start_byte(lexer.code[lexer.code_index]))
+    start_index := lexer.code_index 
+    lexer_advance(lexer)
 
-    for byte_index < len(input) && is_ident_tail_byte(input[byte_index]) {
-        byte_index += 1
+    for lexer.code_index < len(lexer.code) && is_ident_tail_byte(lexer.code[lexer.code_index]) {
+        lexer_advance(lexer)
     }
 
-    text := input[:byte_index]
-    if text == "return" do return Token{.ReturnKeyword, text, {}}, input[byte_index:]
-    else if text == "int" do return Token{.IntKeyword, text, {}}, input[byte_index:]
-    else if text == "void" do return Token{.VoidKeyword, text, {}}, input[byte_index:]
-    else if text == "if" do return Token{.IfKeyword, text, {}}, input[byte_index:]
-    else if text == "else" do return Token{.ElseKeyword, text, {}}, input[byte_index:]
-    else if text == "goto" do return Token{.GotoKeyword, text, {}}, input[byte_index:]
-    else if text == "while" do return Token{.WhileKeyword, text, {}}, input[byte_index:]
-    else if text == "do" do return Token{.DoKeyword, text, {}}, input[byte_index:]
-    else if text == "for" do return Token{.ForKeyword, text, {}}, input[byte_index:]
-    else if text == "continue" do return Token{.ContinueKeyword, text, {}}, input[byte_index:]
-    else if text == "break" do return Token{.BreakKeyword, text, {}}, input[byte_index:]
-    else if text == "switch" do return Token{.SwitchKeyword, text, {}}, input[byte_index:]
-    else if text == "case" do return Token{.CaseKeyword, text, {}}, input[byte_index:]
-    else if text == "default" do return Token{.DefaultKeyword, text, {}}, input[byte_index:]
-    else do return Token{.Ident, text, {}}, input[byte_index:]
+    text := lexer.code[start_index:lexer.code_index]
+    token: Token = ---
+    switch {
+        case text == "return":
+            token = Token{
+                type = .ReturnKeyword,
+                text = text,
+                line = lexer.line,
+                char = lexer.char,
+            }
+
+        case text == "int":
+            token = Token{
+                type = .IntKeyword,
+                text = text,
+                line = lexer.line,
+                char = lexer.char,
+            }
+
+        case text == "if":
+            token = Token{
+                type = .IfKeyword,
+                text = text,
+                line = lexer.line,
+                char = lexer.char,
+            }
+
+        case text == "else":
+            token = Token{
+                type = .ElseKeyword,
+                text = text,
+                line = lexer.line,
+                char = lexer.char,
+            }
+
+        case text == "goto":
+            token = Token{
+                type = .GotoKeyword,
+                text = text,
+                line = lexer.line,
+                char = lexer.char,
+            }
+
+        case text == "while":
+            token = Token{
+                type = .WhileKeyword,
+                text = text,
+                line = lexer.line,
+                char = lexer.char,
+            }
+
+        case text == "do":
+            token = Token{
+                type = .DoKeyword,
+                text = text,
+                line = lexer.line,
+                char = lexer.char,
+            }
+
+        case text == "for":
+            token = Token{
+                type = .ForKeyword,
+                text = text,
+                line = lexer.line,
+                char = lexer.char,
+            }
+
+
+        case text == "continue":
+            token = Token{
+                type = .ContinueKeyword,
+                text = text,
+                line = lexer.line,
+                char = lexer.char,
+            }
+
+
+        case text == "break":
+            token = Token{
+                type = .BreakKeyword,
+                text = text,
+                line = lexer.line,
+                char = lexer.char,
+            }
+
+
+        case text == "switch":
+            token = Token{
+                type = .SwitchKeyword,
+                text = text,
+                line = lexer.line,
+                char = lexer.char,
+            }
+
+
+        case text == "case":
+            token = Token{
+                type = .CaseKeyword,
+                text = text,
+                line = lexer.line,
+                char = lexer.char,
+            }
+
+        case text == "default":
+            token = Token{
+                type = .DefaultKeyword,
+                text = text,
+                line = lexer.line,
+                char = lexer.char,
+            }
+
+        case:
+            token = Token{
+                type = .Ident,
+                text = text,
+                line = lexer.line,
+                char = lexer.char,
+            }
+    }
+    push_to_consumed(lexer, token)
 }
 
 is_ascii_digit_byte :: proc(c: u8) -> bool {
@@ -130,6 +337,10 @@ is_ascii_alpha_byte :: proc(c: u8) -> bool {
     return ('a' <= c && c <= 'z') || ('A' <= c && c <= 'Z')
 }
 
+is_ascii_whitespace_byte :: proc(c: u8) -> bool {
+    return c == '\n' || c == '\r' || c == ' ' || c == '\f' || c == '\t'
+}
+
 is_ident_start_byte :: proc(c: u8) -> bool {
     return is_ascii_alpha_byte(c) || c == '_'
 }
@@ -138,288 +349,485 @@ is_ident_tail_byte :: proc(c: u8) -> bool {
     return is_ascii_alpha_byte(c) || is_ascii_digit_byte(c) || c == '_'
 }
 
-lex :: proc(code: string) -> [dynamic]Token {
-    code := code
-
-    tokens := make([dynamic]Token)
-
-    for {
-        code = strings.trim_left_space(code)
-        if code == "" do break
-
-        switch (code[0]) {
-            case '(':
-                append(&tokens, Token{.LParen, code[:1], {}})
-                code = code[1:]
-                continue
-
-            case ')':
-                append(&tokens, Token{.RParen, code[:1], {}})
-                code = code[1:]
-                continue
-
-            case '{':
-                append(&tokens, Token{.LBrace, code[:1], {}})
-                code = code[1:]
-                continue
-               
-            case '}':
-                append(&tokens, Token{.RBrace, code[:1], {}})
-                code = code[1:]
-                continue
-
-            case ';':
-                append(&tokens, Token{.Semicolon, code[:1], {}})
-                code = code[1:]
-                continue
-            
-            case '-':
-                if code[1] == '-' {
-                    append(&tokens, Token{.MinusMinus, code[:2], {}})
-                    code = code[2:]
-                    continue
-                }
-                else if code[1] == '=' {
-                    append(&tokens, Token{.MinusEqual, code[:2], {}})
-                    code = code[2:]
-                    continue
-                }
-                else {
-                    append(&tokens, Token{.Minus, code[:1], {}})
-                    code = code[1:]
-                    continue
-                }
-
-            case '!':
-                if code[1] == '=' {
-                    append(&tokens, Token{.BangEqual, code[:2], {}})
-                    code = code[2:]
-                    continue
-                }
-                else {
-                    append(&tokens, Token{.Bang, code[:1], {}})
-                    code = code[1:]
-                    continue
-                }
-
-            case '?':
-                append(&tokens, Token{.QuestionMark, code[:1], {}})
-                code = code[1:]
-                continue
-
-            case ':':
-                append(&tokens, Token{.Colon, code[:1], {}})
-                code = code[1:]
-                continue
-
-            case '~':
-                append(&tokens, Token{.Tilde, code[:1], {}})
-                code = code[1:]
-                continue
-
-            case '*':
-                if code[1] == '=' {
-                    append(&tokens, Token{.StarEqual, code[:2], {}})
-                    code = code[2:]
-                    continue
-                }
-                else {
-                    append(&tokens, Token{.Star, code[:1], {}})
-                    code = code[1:]
-                    continue
-                }
-
-            case '%':
-                if code[1] == '=' {
-                    append(&tokens, Token{.PercentEqual, code[:2], {}})
-                    code = code[2:]
-                    continue
-                }
-                else {
-                    append(&tokens, Token{.Percent, code[:1], {}})
-                    code = code[1:]
-                    continue
-                }
-
-            case '/':
-                if code[1] == '/' {
-                    // Single line comments
-                    i := 2
-                    for code[i] != '\n' do i += 1
-                    code = code[i + 1:]
-                }
-                else if code[1] == '=' {
-                    append(&tokens, Token{.SlashEqual, code[:2], {}})
-                    code = code[2:]
-                    continue
-                }
-                else if code[1] == '*' {
-                    // Multi-line comments
-                    i := 2
-                    for code[i] != '*' || code[i + 1] != '/' do i += 1
-                    code = code[i + 2:]
-                }
-                else {
-                    append(&tokens, Token{.ForwardSlash, code[:1], {}})
-                    code = code[1:]
-                }
-                continue
-
-            // @HACK: We skip preprocessor directives for now, since they are more complicated than we are ready for
-            case '#':
-                i := 1
-                for code[i] != '\n' do i += 1
-                code = code[i + 1:]
-                continue
-
-            case '^':
-                if code[1] == '=' {
-                    append(&tokens, Token{.CaratEqual, code[:2], {}})
-                    code = code[2:]
-                    continue
-                }
-                else {
-                    append(&tokens, Token{.Carat, code[:1], {}})
-                    code = code[1:]
-                    continue
-                }
-
-            case '+':
-                if code[1] == '+' {
-                    append(&tokens, Token{.PlusPlus, code[:2], {}})
-                    code = code[2:]
-                    continue
-                }
-                else if code[1] == '=' {
-                    append(&tokens, Token{.PlusEqual, code[:2], {}})
-                    code = code[2:]
-                    continue
-                }
-                else {
-                    append(&tokens, Token{.Plus, code[:1], {}})
-                    code = code[1:]
-                    continue
-                }
-
-            case ',':
-                append(&tokens, Token{.Comma, code[:1], {}})
-                code = code[1:]
-                continue
-
-            case '>':
-                if code[1] == '=' {
-                    append(&tokens, Token{.MoreEqual, code[:2], {}})
-                    code = code[2:]
-                    continue
-                }
-                else if code[1] == '>' {
-                    if code[2] == '=' {
-                        append(&tokens, Token{.MoreMoreEqual, code[:3], {}})
-                        code = code[3:]
-                        continue
-                    }
-                    else {
-                        append(&tokens, Token{.MoreMore, code[:2], {}})
-                        code = code[2:]
-                        continue
-                    }
-                }
-                else {
-                    append(&tokens, Token{.More, code[:1], {}})
-                    code = code[1:]
-                    continue
-                }
-
-            case '<':
-                if code[1] == '=' {
-                    append(&tokens, Token{.LessEqual, code[:2], {}})
-                    code = code[2:]
-                    continue
-                }
-                else if code[1] == '<' {
-                    if code[2] == '=' {
-                        append(&tokens, Token{.LessLessEqual, code[:3], {}})
-                        code = code[3:]
-                        continue
-                    }
-                    else {
-                        append(&tokens, Token{.LessLess, code[:2], {}})
-                        code = code[2:]
-                        continue
-                    }
-                }
-                else {
-                    append(&tokens, Token{.Less, code[:1], {}})
-                    code = code[1:]
-                    continue
-                }
-
-            case '&':
-                if code[1] == '&' {
-                    append(&tokens, Token{.DoubleAnd, code[:2], {}})
-                    code = code[2:]
-                    continue
-                }
-                else if code[1] == '=' {
-                    append(&tokens, Token{.AndEqual, code[:2], {}})
-                    code = code[2:]
-                    continue
-                }
-                else {
-                    append(&tokens, Token{.And, code[:1], {}})
-                    code = code[1:]
-                    continue
-                }
-
-            case '|':
-                if code[1] == '|' {
-                    append(&tokens, Token{.DoublePipe, code[:2], {}})
-                    code = code[2:]
-                    continue
-                }
-                else if code[1] == '=' {
-                    append(&tokens, Token{.PipeEqual, code[:2], {}})
-                    code = code[2:]
-                    continue
-                }
-                else {
-                    append(&tokens, Token{.Pipe, code[:1], {}})
-                    code = code[1:]
-                    continue
-                }
-
-            case '=':
-                if code[1] == '=' {
-                    append(&tokens, Token{.DoubleEqual, code[:2], {}})
-                    code = code[2:]
-                    continue
-                }
-                else {
-                    append(&tokens, Token{.Equal, code[:1], {}})
-                    code = code[1:]
-                    continue
-                }
-
-            case: // Not a punctuation. Fall through to below
-        }
-
-        token: Token
-        if is_ascii_digit_byte(code[0]) {
-            token, code = get_int_constant_token(code)
-            append(&tokens, token)
-        }
-        else if is_ident_start_byte(code[0]) {
-            token, code = get_keyword_or_ident_token(code)
-            append(&tokens, token)
-        }
-        else {
-            lex_error(code[0]);
-        }
+consume_token :: proc(lexer: ^Lexer) {
+    lexer_eat_whitespace(lexer)
+    if lexer.code_index >= len(lexer.code) {
+        push_to_consumed(lexer, Token{
+            type = .EndOfFile,
+            line = lexer.line,
+            char = lexer.char
+        })
+        return
     }
 
-    return tokens
+    if is_ascii_digit_byte(lexer.code[lexer.code_index]) {
+        consume_int_constant_token(lexer)
+        return
+    }
+    else if is_ident_start_byte(lexer.code[lexer.code_index]) {
+        consume_keyword_or_ident_token(lexer)
+        return
+    }
+
+    token: Token = ---
+    switch lexer.code[lexer.code_index] {
+        case '(':
+            token = Token{
+                type = .LParen,
+                text = lexer.code[lexer.code_index:lexer.code_index + 1],
+                line = lexer.line,
+                char = lexer.char,
+            }
+            lexer_advance(lexer)
+
+        case ')':
+            token = Token{
+                type = .RParen,
+                text = lexer.code[lexer.code_index:lexer.code_index + 1],
+                line = lexer.line,
+                char = lexer.char,
+            }
+            lexer_advance(lexer)
+
+        case '{':
+            token = Token{
+                type = .LBrace,
+                text = lexer.code[lexer.code_index:lexer.code_index + 1],
+                line = lexer.line,
+                char = lexer.char,
+            }
+            lexer_advance(lexer)
+           
+        case '}':
+            token = Token{
+                type = .RBrace,
+                text = lexer.code[lexer.code_index:lexer.code_index + 1],
+                line = lexer.line,
+                char = lexer.char,
+            }
+            lexer_advance(lexer)
+
+        case ';':
+            token = Token{
+                type = .Semicolon,
+                text = lexer.code[lexer.code_index:lexer.code_index + 1],
+                line = lexer.line,
+                char = lexer.char,
+            }
+            lexer_advance(lexer)
+        
+        case '-':
+            if lexer.code[lexer.code_index + 1] == '-' {
+                token = Token{
+                    type = .MinusMinus,
+                    text = lexer.code[lexer.code_index:lexer.code_index + 2],
+                    line = lexer.line,
+                    char = lexer.char,
+                }
+                lexer_advance(lexer)
+                lexer_advance(lexer)
+            }
+            else if lexer.code[lexer.code_index + 1] == '=' {
+                token = Token{
+                    type = .MinusEqual,
+                    text = lexer.code[lexer.code_index:lexer.code_index + 2],
+                    line = lexer.line,
+                    char = lexer.char,
+                }
+                lexer_advance(lexer)
+                lexer_advance(lexer)
+            }
+            else {
+                token = Token{
+                    type = .Minus,
+                    text = lexer.code[lexer.code_index:lexer.code_index + 1],
+                    line = lexer.line,
+                    char = lexer.char,
+                }
+                lexer_advance(lexer)
+            }
+
+        case '!':
+            if lexer.code[lexer.code_index + 1] == '=' {
+                token = Token{
+                    type = .BangEqual,
+                    text = lexer.code[lexer.code_index:lexer.code_index + 2],
+                    line = lexer.line,
+                    char = lexer.char,
+                }
+                lexer_advance(lexer)
+                lexer_advance(lexer)
+            }
+            else {
+                token = Token{
+                    type = .Bang,
+                    text = lexer.code[lexer.code_index:lexer.code_index + 1],
+                    line = lexer.line,
+                    char = lexer.char,
+                }
+                lexer_advance(lexer)
+            }
+
+        case '?':
+            token = Token{
+                type = .QuestionMark,
+                text = lexer.code[lexer.code_index:lexer.code_index + 1],
+                line = lexer.line,
+                char = lexer.char,
+            }
+            lexer_advance(lexer)
+
+        case ':':
+            token = Token{
+                type = .Colon,
+                text = lexer.code[lexer.code_index:lexer.code_index + 1],
+                line = lexer.line,
+                char = lexer.char,
+            }
+            lexer_advance(lexer)
+
+        case '~':
+            token = Token{
+                type = .Tilde,
+                text = lexer.code[lexer.code_index:lexer.code_index + 1],
+                line = lexer.line,
+                char = lexer.char,
+            }
+            lexer_advance(lexer)
+
+        case '*':
+            if lexer.code[lexer.code_index + 1] == '=' {
+                token = Token{
+                    type = .StarEqual,
+                    text = lexer.code[lexer.code_index:lexer.code_index + 2],
+                    line = lexer.line,
+                    char = lexer.char,
+                }
+                lexer_advance(lexer)
+                lexer_advance(lexer)
+            }
+            else {
+                token = Token{
+                    type = .Star,
+                    text = lexer.code[lexer.code_index:lexer.code_index + 1],
+                    line = lexer.line,
+                    char = lexer.char,
+                }
+                lexer_advance(lexer)
+            }
+
+        case '%':
+            if lexer.code[lexer.code_index + 1] == '=' {
+                token = Token{
+                    type = .PercentEqual,
+                    text = lexer.code[lexer.code_index:lexer.code_index + 2],
+                    line = lexer.line,
+                    char = lexer.char,
+                }
+                lexer_advance(lexer)
+                lexer_advance(lexer)
+            }
+            else {
+                token = Token{
+                    type = .Percent,
+                    text = lexer.code[lexer.code_index:lexer.code_index + 1],
+                    line = lexer.line,
+                    char = lexer.char,
+                }
+                lexer_advance(lexer)
+            }
+
+        case '/':
+            if lexer.code[lexer.code_index + 1] == '/' {
+                lexer_eat_until_newline(lexer)
+            }
+            else if lexer.code[lexer.code_index + 1] == '=' {
+                token = Token{
+                    type = .SlashEqual,
+                    text = lexer.code[lexer.code_index:lexer.code_index + 2],
+                    line = lexer.line,
+                    char = lexer.char,
+                }
+                lexer_advance(lexer)
+                lexer_advance(lexer)
+            }
+            else if lexer.code[lexer.code_index + 1] == '*' {
+                lexer_eat_multiline_comment(lexer)
+            }
+            else {
+                token = Token{
+                    type = .Slash,
+                    text = lexer.code[lexer.code_index:lexer.code_index + 1],
+                    line = lexer.line,
+                    char = lexer.char,
+                }
+                lexer_advance(lexer)
+            }
+
+        // @HACK: We skip preprocessor directives for now, since they are more complicated than we are ready for
+        case '#':
+            lexer_eat_until_newline(lexer)
+
+        case '^':
+            if lexer.code[lexer.code_index + 1] == '=' {
+                token = Token{
+                    type = .CaratEqual,
+                    text = lexer.code[lexer.code_index:lexer.code_index + 2],
+                    line = lexer.line,
+                    char = lexer.char,
+                }
+                lexer_advance(lexer)
+                lexer_advance(lexer)
+            }
+            else {
+                token = Token{
+                    type = .Carat,
+                    text = lexer.code[lexer.code_index:lexer.code_index + 1],
+                    line = lexer.line,
+                    char = lexer.char,
+                }
+                lexer_advance(lexer)
+            }
+
+        case '+':
+            if lexer.code[lexer.code_index + 1] == '+' {
+                token = Token{
+                    type = .PlusPlus,
+                    text = lexer.code[lexer.code_index:lexer.code_index + 2],
+                    line = lexer.line,
+                    char = lexer.char,
+                }
+                lexer_advance(lexer)
+                lexer_advance(lexer)
+            }
+            else if lexer.code[lexer.code_index + 1] == '=' {
+                token = Token{
+                    type = .PlusEqual,
+                    text = lexer.code[lexer.code_index:lexer.code_index + 2],
+                    line = lexer.line,
+                    char = lexer.char,
+                }
+                lexer_advance(lexer)
+                lexer_advance(lexer)
+            }
+            else {
+                token = Token{
+                    type = .Plus,
+                    text = lexer.code[lexer.code_index:lexer.code_index + 1],
+                    line = lexer.line,
+                    char = lexer.char,
+                }
+                lexer_advance(lexer)
+            }
+
+        case ',':
+            token = Token{
+                type = .Comma,
+                text = lexer.code[lexer.code_index:lexer.code_index + 1],
+                line = lexer.line,
+                char = lexer.char,
+            }
+            lexer_advance(lexer)
+
+        case '>':
+            if lexer.code[lexer.code_index + 1] == '=' {
+                token = Token{
+                    type = .MoreEqual,
+                    text = lexer.code[lexer.code_index:lexer.code_index + 2],
+                    line = lexer.line,
+                    char = lexer.char,
+                }
+                lexer_advance(lexer)
+                lexer_advance(lexer)
+            }
+            else if lexer.code[lexer.code_index + 1] == '>' {
+                if lexer.code[lexer.code_index + 2] == '=' {
+                    token = Token{
+                        type = .MoreMoreEqual,
+                        text = lexer.code[lexer.code_index:lexer.code_index + 3],
+                        line = lexer.line,
+                        char = lexer.char,
+                    }
+                    lexer_advance(lexer)
+                    lexer_advance(lexer)
+                    lexer_advance(lexer)
+                }
+                else {
+                    token = Token{
+                        type = .MoreMore,
+                        text = lexer.code[lexer.code_index:lexer.code_index + 2],
+                        line = lexer.line,
+                        char = lexer.char,
+                    }
+                    lexer_advance(lexer)
+                    lexer_advance(lexer)
+                }
+            }
+            else {
+                token = Token{
+                    type = .More,
+                    text = lexer.code[lexer.code_index:lexer.code_index + 1],
+                    line = lexer.line,
+                    char = lexer.char,
+                }
+                lexer_advance(lexer)
+            }
+
+        case '<':
+            if lexer.code[lexer.code_index + 1] == '=' {
+                token = Token{
+                    type = .LessEqual,
+                    text = lexer.code[lexer.code_index:lexer.code_index + 2],
+                    line = lexer.line,
+                    char = lexer.char,
+                }
+                lexer_advance(lexer)
+                lexer_advance(lexer)
+            }
+            else if lexer.code[lexer.code_index + 1] == '>' {
+                if lexer.code[lexer.code_index + 2] == '=' {
+                    token = Token{
+                        type = .LessLessEqual,
+                        text = lexer.code[lexer.code_index:lexer.code_index + 3],
+                        line = lexer.line,
+                        char = lexer.char,
+                    }
+                    lexer_advance(lexer)
+                    lexer_advance(lexer)
+                    lexer_advance(lexer)
+                }
+                else {
+                    token = Token{
+                        type = .LessLess,
+                        text = lexer.code[lexer.code_index:lexer.code_index + 2],
+                        line = lexer.line,
+                        char = lexer.char,
+                    }
+                    lexer_advance(lexer)
+                    lexer_advance(lexer)
+                }
+            }
+            else {
+                token = Token{
+                    type = .Less,
+                    text = lexer.code[lexer.code_index:lexer.code_index + 1],
+                    line = lexer.line,
+                    char = lexer.char,
+                }
+                lexer_advance(lexer)
+            }
+
+        case '&':
+            if lexer.code[lexer.code_index + 1] == '&' {
+                token = Token{
+                    type = .DoubleAnd,
+                    text = lexer.code[lexer.code_index:lexer.code_index + 2],
+                    line = lexer.line,
+                    char = lexer.char,
+                }
+                lexer_advance(lexer)
+                lexer_advance(lexer)
+            }
+            else if lexer.code[lexer.code_index + 1] == '=' {
+                token = Token{
+                    type = .AndEqual,
+                    text = lexer.code[lexer.code_index:lexer.code_index + 2],
+                    line = lexer.line,
+                    char = lexer.char,
+                }
+                lexer_advance(lexer)
+                lexer_advance(lexer)
+            }
+            else {
+                token = Token{
+                    type = .And,
+                    text = lexer.code[lexer.code_index:lexer.code_index + 1],
+                    line = lexer.line,
+                    char = lexer.char,
+                }
+                lexer_advance(lexer)
+            }
+
+        case '|':
+            if lexer.code[lexer.code_index + 1] == '|' {
+                token = Token{
+                    type = .DoublePipe,
+                    text = lexer.code[lexer.code_index:lexer.code_index + 2],
+                    line = lexer.line,
+                    char = lexer.char,
+                }
+                lexer_advance(lexer)
+                lexer_advance(lexer)
+            }
+            else if lexer.code[lexer.code_index + 1] == '=' {
+                token = Token{
+                    type = .PipeEqual,
+                    text = lexer.code[lexer.code_index:lexer.code_index + 2],
+                    line = lexer.line,
+                    char = lexer.char,
+                }
+                lexer_advance(lexer)
+                lexer_advance(lexer)
+            }
+            else {
+                token = Token{
+                    type = .Pipe,
+                    text = lexer.code[lexer.code_index:lexer.code_index + 1],
+                    line = lexer.line,
+                    char = lexer.char,
+                }
+                lexer_advance(lexer)
+            }
+
+        case '=':
+            if lexer.code[lexer.code_index + 1] == '=' {
+                token = Token{
+                    type = .DoubleEqual,
+                    text = lexer.code[lexer.code_index:lexer.code_index + 2],
+                    line = lexer.line,
+                    char = lexer.char,
+                }
+                lexer_advance(lexer)
+                lexer_advance(lexer)
+            }
+            else {
+                token = Token{
+                    type = .Equal,
+                    text = lexer.code[lexer.code_index:lexer.code_index + 1],
+                    line = lexer.line,
+                    char = lexer.char,
+                }
+                lexer_advance(lexer)
+            }
+
+        case: lex_error(lexer)
+    }
+
+    push_to_consumed(lexer, token)
 }
 
+get_token :: proc(lexer: ^Lexer) -> Token {
+    if consumed_is_empty(lexer) {
+        consume_token(lexer)
+    }
+
+    token := peek_from_consumed(lexer)
+    if token.type == .EndOfFile {
+        return token
+    }
+    else {
+        return pop_from_consumed(lexer)
+    }
+}
+
+peek_token :: proc(lexer: ^Lexer) -> Token {
+    if consumed_is_empty(lexer) {
+        consume_token(lexer)
+    }
+    return peek_from_consumed(lexer)
+}
+
+/*
 take_first_token :: proc(tokens: []Token) -> (token: Token, rest: []Token) {
     if len(tokens) == 0 do parse_error(token, tokens)
     return slice.split_first(tokens)
@@ -2079,6 +2487,7 @@ compile_with_gcc :: proc(in_file: string, out_file: string) {
         fmt.eprintfln("Failed to compile %v with gcc", in_file)
     }
 }
+*/
 
 usage :: proc() {
     fmt.eprintln("USAGE: occm [-assembly] <source_file>")
@@ -2103,6 +2512,13 @@ main :: proc() {
         return
     }
 
+    /*
     if assembly do compile_to_assembly(filename)
     else        do compile_from_file(filename)
+    */
+    code, ok := os.read_entire_file(filename)
+    lexer := Lexer{code = string(code[:])}
+    for token := get_token(&lexer); token.type != .EndOfFile; token = get_token(&lexer) {
+        fmt.println(token)
+    }
 }
