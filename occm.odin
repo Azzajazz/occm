@@ -1476,13 +1476,13 @@ parse_expression_leaf :: proc(parser: ^Parser) -> ^Ast_Node {
 parse_for_precondition :: proc(parser: ^Parser) -> ^Ast_Node {
     token := look_ahead(&parser.lexer, 1)
 
-    statement: ^Ast_Node = ---
     if token.type == .IntKeyword {
         token_1 := look_ahead(&parser.lexer, 2)
         token_2 := look_ahead(&parser.lexer, 3)
         if token_1.type != .Ident do parse_error(parser, "Expected an identifier in declaration.")
         var_name := token_1.text
 
+        statement: ^Ast_Node = ---
         if token_2.type == .Semicolon {
             take_token(&parser.lexer)
             take_token(&parser.lexer)
@@ -1499,14 +1499,16 @@ parse_for_precondition :: proc(parser: ^Parser) -> ^Ast_Node {
         else {
             parse_error(parser, "Invalid 'for' loop precondition.")
         }
+
+        token = take_token(&parser.lexer)
+        if token.type != .Semicolon do parse_error(parser, "Expected a semicolon after loop precondition.")
+        return statement
     }
     else {
-        statement = parse_statement(parser) // @TODO: Statements are more than we need here.
+        return parse_statement(parser) // @TODO: Statements are more than we need here.
     }
 
-    token = take_token(&parser.lexer)
-    if token.type != .Semicolon do parse_error(parser, "Expected a semicolon after loop precondition.")
-    return statement
+    panic("Unreachable")
 }
 
 parse_postfix_operators :: proc(parser: ^Parser, inner: ^Ast_Node) -> ^Ast_Node {
