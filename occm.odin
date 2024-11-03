@@ -1325,11 +1325,10 @@ parse_statement :: proc(parser: ^Parser, labels: [dynamic]Label = nil) -> ^Ast_N
             token = take_token(&parser.lexer)
             if token.type != .LParen do parse_error(parser, "Expected a '(' before loop conditions.")
             pre_condition := parse_for_precondition(parser)
-            token = take_token(&parser.lexer)
-            if token.type != .Semicolon do parse_error(parser, "Expected a semicolon after loop precondition.")
 
             condition: ^Ast_Node = ---
             token = look_ahead(&parser.lexer, 1)
+            fmt.println(token)
             if token.type == .Semicolon {
                 condition = make_node_1(Int_Constant_Node, 1) // If expression is empty, replace it with a condition that is always true
             }
@@ -1477,6 +1476,7 @@ parse_expression_leaf :: proc(parser: ^Parser) -> ^Ast_Node {
 parse_for_precondition :: proc(parser: ^Parser) -> ^Ast_Node {
     token := look_ahead(&parser.lexer, 1)
 
+    statement: ^Ast_Node = ---
     if token.type == .IntKeyword {
         token_1 := look_ahead(&parser.lexer, 2)
         token_2 := look_ahead(&parser.lexer, 3)
@@ -1487,26 +1487,26 @@ parse_for_precondition :: proc(parser: ^Parser) -> ^Ast_Node {
             take_token(&parser.lexer)
             take_token(&parser.lexer)
             take_token(&parser.lexer)
-            statement := make_node_1(Decl_Node, var_name)
-            return statement
+            statement = make_node_1(Decl_Node, var_name)
         }
         else if token_2.type == .Equal {
             take_token(&parser.lexer)
             take_token(&parser.lexer)
             take_token(&parser.lexer)
             right := parse_expression(parser)
-            statement := make_node_2(Decl_Assign_Node, var_name, right)
-            return statement
+            statement = make_node_2(Decl_Assign_Node, var_name, right)
         }
         else {
             parse_error(parser, "Invalid 'for' loop precondition.")
         }
     }
     else {
-        return parse_expression(parser)
+        statement = parse_statement(parser) // @TODO: Statements are more than we need here.
     }
 
-    panic("Unreachable")
+    token = take_token(&parser.lexer)
+    if token.type != .Semicolon do parse_error(parser, "Expected a semicolon after loop precondition.")
+    return statement
 }
 
 parse_postfix_operators :: proc(parser: ^Parser, inner: ^Ast_Node) -> ^Ast_Node {
