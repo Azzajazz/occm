@@ -9,7 +9,7 @@ def generate_exp_files_with_gcc(base_path: str):
         generate_exp_file_with_gcc(base_path)
     else:
         for root, dirs, files in os.walk(base_path):
-            if "valid\\" in root:
+            if "\\valid" in root:
                 for file in files:
                     if file.endswith(".c"):
                         generate_exp_file_with_gcc(os.path.join(root, file))

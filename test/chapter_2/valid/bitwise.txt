@@ -1,1 +1,2 @@
 exit_code: 4294967283
+stdout: b''

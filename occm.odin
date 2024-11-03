@@ -45,7 +45,6 @@ Token_Type :: enum {
     PlusEqual, // +=
     MinusEqual, // -=
     StarEqual, // *=
-    Slash,
     SlashEqual, // /=
     PercentEqual, // %=
     CaratEqual, // ^=
@@ -85,7 +84,7 @@ Token :: struct {
     char: int,
 }
 
-CONSUMED_LEN :: 8
+CONSUMED_SIZE :: 8
 Lexer :: struct {
     code: string,
     code_index: int,
@@ -97,7 +96,7 @@ Lexer :: struct {
 
     // Queue of consumed tokens
     // This is to avoid having to construct a temporary lexer when peeking tokens
-    consumed: [CONSUMED_LEN]Token,
+    consumed: [CONSUMED_SIZE]Token,
     consumed_head: int,
     consumed_tail: int,
 }
@@ -145,32 +144,46 @@ consumed_is_empty :: proc(lexer: ^Lexer) -> bool {
 }
 
 consumed_is_full :: proc(lexer: ^Lexer) -> bool {
-    return (lexer.consumed_head == 0 && lexer.consumed_tail == CONSUMED_LEN - 1) || lexer.consumed_tail == lexer.consumed_head - 1
+    return (lexer.consumed_head == 0 && lexer.consumed_tail == CONSUMED_SIZE - 1) || lexer.consumed_tail == lexer.consumed_head - 1
 }
 
 push_to_consumed :: proc(lexer: ^Lexer, token: Token) {
     assert(!consumed_is_full(lexer))
     lexer.consumed[lexer.consumed_tail] = token
     lexer.consumed_tail += 1
-    if lexer.consumed_tail >= CONSUMED_LEN do lexer.consumed_tail = 0
+    if lexer.consumed_tail >= CONSUMED_SIZE do lexer.consumed_tail = 0
 }
 
-peek_from_consumed :: proc(lexer: ^Lexer) -> Token {
-    peek_index := lexer.consumed_tail - 1
-    if peek_index < 0 do peek_index = CONSUMED_LEN - 1
-    return lexer.consumed[peek_index]
+consumed_at :: proc(lexer: ^Lexer, index: int) -> Token {
+    assert(index < consumed_len(lexer))
+    buffer_index := lexer.consumed_head + index
+    if buffer_index >= CONSUMED_SIZE {
+        buffer_index -= CONSUMED_SIZE
+    }
+    return lexer.consumed[buffer_index]
+}
+
+consumed_len :: proc(lexer: ^Lexer) -> int {
+    if lexer.consumed_head <= lexer.consumed_tail {
+        return lexer.consumed_tail - lexer.consumed_head
+    }
+    else {
+        start_len := lexer.consumed_tail
+        end_len := CONSUMED_SIZE - lexer.consumed_head
+        return start_len + end_len
+    }
 }
 
 pop_from_consumed :: proc(lexer: ^Lexer) -> Token {
     assert(!consumed_is_empty(lexer))
     token := lexer.consumed[lexer.consumed_head]
     lexer.consumed_head += 1
-    if lexer.consumed_head >= CONSUMED_LEN do lexer.consumed_head = 0
+    if lexer.consumed_head >= CONSUMED_SIZE do lexer.consumed_head = 0
     return token
 }
 
 lex_error :: proc(lexer: ^Lexer) {
-    fmt.printfln("%v(%v:%v) Syntax error: Unexpected character %c", lexer.file, lexer.line, lexer.char, lexer.code[lexer.code_index])
+    fmt.printfln("%v(%v:%v) Syntax error: Unexpected character %c", lexer.file, lexer.line + 1, lexer.char + 1, lexer.code[lexer.code_index])
     os.exit(2)
 }
 
@@ -182,7 +195,7 @@ consume_int_constant_token :: proc(lexer: ^Lexer) {
         lexer_advance(lexer)
     }
 
-
+    // We need to catch identifiers that start with a number here, and are therefore invalid.
     if lexer.code_index < len(lexer.code) && is_ascii_alpha_byte(lexer.code[lexer.code_index]) {
         lex_error(lexer)
     }
@@ -221,6 +234,14 @@ consume_keyword_or_ident_token :: proc(lexer: ^Lexer) {
         case text == "int":
             token = Token{
                 type = .IntKeyword,
+                text = text,
+                line = lexer.line,
+                char = lexer.char,
+            }
+
+        case text == "void":
+            token = Token{
+                type = .VoidKeyword,
                 text = text,
                 line = lexer.line,
                 char = lexer.char,
@@ -350,311 +371,233 @@ is_ident_tail_byte :: proc(c: u8) -> bool {
 }
 
 consume_token :: proc(lexer: ^Lexer) {
-    lexer_eat_whitespace(lexer)
-    if lexer.code_index >= len(lexer.code) {
-        push_to_consumed(lexer, Token{
-            type = .EndOfFile,
-            line = lexer.line,
-            char = lexer.char
-        })
-        return
-    }
-
-    if is_ascii_digit_byte(lexer.code[lexer.code_index]) {
-        consume_int_constant_token(lexer)
-        return
-    }
-    else if is_ident_start_byte(lexer.code[lexer.code_index]) {
-        consume_keyword_or_ident_token(lexer)
-        return
-    }
-
+    // @TODO: This for loop is kind of gross. Is there a better way here?
     token: Token = ---
-    switch lexer.code[lexer.code_index] {
-        case '(':
-            token = Token{
-                type = .LParen,
-                text = lexer.code[lexer.code_index:lexer.code_index + 1],
+    for {
+        lexer_eat_whitespace(lexer)
+        if lexer.code_index >= len(lexer.code) {
+            push_to_consumed(lexer, Token{
+                type = .EndOfFile,
                 line = lexer.line,
-                char = lexer.char,
-            }
-            lexer_advance(lexer)
+                char = lexer.char
+            })
+            return
+        }
 
-        case ')':
-            token = Token{
-                type = .RParen,
-                text = lexer.code[lexer.code_index:lexer.code_index + 1],
-                line = lexer.line,
-                char = lexer.char,
-            }
-            lexer_advance(lexer)
+        if is_ascii_digit_byte(lexer.code[lexer.code_index]) {
+            consume_int_constant_token(lexer)
+            return
+        }
+        else if is_ident_start_byte(lexer.code[lexer.code_index]) {
+            consume_keyword_or_ident_token(lexer)
+            return
+        }
 
-        case '{':
-            token = Token{
-                type = .LBrace,
-                text = lexer.code[lexer.code_index:lexer.code_index + 1],
-                line = lexer.line,
-                char = lexer.char,
-            }
-            lexer_advance(lexer)
-           
-        case '}':
-            token = Token{
-                type = .RBrace,
-                text = lexer.code[lexer.code_index:lexer.code_index + 1],
-                line = lexer.line,
-                char = lexer.char,
-            }
-            lexer_advance(lexer)
-
-        case ';':
-            token = Token{
-                type = .Semicolon,
-                text = lexer.code[lexer.code_index:lexer.code_index + 1],
-                line = lexer.line,
-                char = lexer.char,
-            }
-            lexer_advance(lexer)
-        
-        case '-':
-            if lexer.code[lexer.code_index + 1] == '-' {
+        switch lexer.code[lexer.code_index] {
+            case '(':
                 token = Token{
-                    type = .MinusMinus,
-                    text = lexer.code[lexer.code_index:lexer.code_index + 2],
-                    line = lexer.line,
-                    char = lexer.char,
-                }
-                lexer_advance(lexer)
-                lexer_advance(lexer)
-            }
-            else if lexer.code[lexer.code_index + 1] == '=' {
-                token = Token{
-                    type = .MinusEqual,
-                    text = lexer.code[lexer.code_index:lexer.code_index + 2],
-                    line = lexer.line,
-                    char = lexer.char,
-                }
-                lexer_advance(lexer)
-                lexer_advance(lexer)
-            }
-            else {
-                token = Token{
-                    type = .Minus,
+                    type = .LParen,
                     text = lexer.code[lexer.code_index:lexer.code_index + 1],
                     line = lexer.line,
                     char = lexer.char,
                 }
                 lexer_advance(lexer)
-            }
 
-        case '!':
-            if lexer.code[lexer.code_index + 1] == '=' {
+            case ')':
                 token = Token{
-                    type = .BangEqual,
-                    text = lexer.code[lexer.code_index:lexer.code_index + 2],
-                    line = lexer.line,
-                    char = lexer.char,
-                }
-                lexer_advance(lexer)
-                lexer_advance(lexer)
-            }
-            else {
-                token = Token{
-                    type = .Bang,
+                    type = .RParen,
                     text = lexer.code[lexer.code_index:lexer.code_index + 1],
                     line = lexer.line,
                     char = lexer.char,
                 }
                 lexer_advance(lexer)
-            }
 
-        case '?':
-            token = Token{
-                type = .QuestionMark,
-                text = lexer.code[lexer.code_index:lexer.code_index + 1],
-                line = lexer.line,
-                char = lexer.char,
-            }
-            lexer_advance(lexer)
-
-        case ':':
-            token = Token{
-                type = .Colon,
-                text = lexer.code[lexer.code_index:lexer.code_index + 1],
-                line = lexer.line,
-                char = lexer.char,
-            }
-            lexer_advance(lexer)
-
-        case '~':
-            token = Token{
-                type = .Tilde,
-                text = lexer.code[lexer.code_index:lexer.code_index + 1],
-                line = lexer.line,
-                char = lexer.char,
-            }
-            lexer_advance(lexer)
-
-        case '*':
-            if lexer.code[lexer.code_index + 1] == '=' {
+            case '{':
                 token = Token{
-                    type = .StarEqual,
-                    text = lexer.code[lexer.code_index:lexer.code_index + 2],
-                    line = lexer.line,
-                    char = lexer.char,
-                }
-                lexer_advance(lexer)
-                lexer_advance(lexer)
-            }
-            else {
-                token = Token{
-                    type = .Star,
+                    type = .LBrace,
                     text = lexer.code[lexer.code_index:lexer.code_index + 1],
                     line = lexer.line,
                     char = lexer.char,
                 }
                 lexer_advance(lexer)
-            }
-
-        case '%':
-            if lexer.code[lexer.code_index + 1] == '=' {
+               
+            case '}':
                 token = Token{
-                    type = .PercentEqual,
-                    text = lexer.code[lexer.code_index:lexer.code_index + 2],
-                    line = lexer.line,
-                    char = lexer.char,
-                }
-                lexer_advance(lexer)
-                lexer_advance(lexer)
-            }
-            else {
-                token = Token{
-                    type = .Percent,
+                    type = .RBrace,
                     text = lexer.code[lexer.code_index:lexer.code_index + 1],
                     line = lexer.line,
                     char = lexer.char,
                 }
                 lexer_advance(lexer)
-            }
 
-        case '/':
-            if lexer.code[lexer.code_index + 1] == '/' {
+            case ';':
+                token = Token{
+                    type = .Semicolon,
+                    text = lexer.code[lexer.code_index:lexer.code_index + 1],
+                    line = lexer.line,
+                    char = lexer.char,
+                }
+                lexer_advance(lexer)
+            
+            case '-':
+                if lexer.code[lexer.code_index + 1] == '-' {
+                    token = Token{
+                        type = .MinusMinus,
+                        text = lexer.code[lexer.code_index:lexer.code_index + 2],
+                        line = lexer.line,
+                        char = lexer.char,
+                    }
+                    lexer_advance(lexer)
+                    lexer_advance(lexer)
+                }
+                else if lexer.code[lexer.code_index + 1] == '=' {
+                    token = Token{
+                        type = .MinusEqual,
+                        text = lexer.code[lexer.code_index:lexer.code_index + 2],
+                        line = lexer.line,
+                        char = lexer.char,
+                    }
+                    lexer_advance(lexer)
+                    lexer_advance(lexer)
+                }
+                else {
+                    token = Token{
+                        type = .Minus,
+                        text = lexer.code[lexer.code_index:lexer.code_index + 1],
+                        line = lexer.line,
+                        char = lexer.char,
+                    }
+                    lexer_advance(lexer)
+                }
+
+            case '!':
+                if lexer.code[lexer.code_index + 1] == '=' {
+                    token = Token{
+                        type = .BangEqual,
+                        text = lexer.code[lexer.code_index:lexer.code_index + 2],
+                        line = lexer.line,
+                        char = lexer.char,
+                    }
+                    lexer_advance(lexer)
+                    lexer_advance(lexer)
+                }
+                else {
+                    token = Token{
+                        type = .Bang,
+                        text = lexer.code[lexer.code_index:lexer.code_index + 1],
+                        line = lexer.line,
+                        char = lexer.char,
+                    }
+                    lexer_advance(lexer)
+                }
+
+            case '?':
+                token = Token{
+                    type = .QuestionMark,
+                    text = lexer.code[lexer.code_index:lexer.code_index + 1],
+                    line = lexer.line,
+                    char = lexer.char,
+                }
+                lexer_advance(lexer)
+
+            case ':':
+                token = Token{
+                    type = .Colon,
+                    text = lexer.code[lexer.code_index:lexer.code_index + 1],
+                    line = lexer.line,
+                    char = lexer.char,
+                }
+                lexer_advance(lexer)
+
+            case '~':
+                token = Token{
+                    type = .Tilde,
+                    text = lexer.code[lexer.code_index:lexer.code_index + 1],
+                    line = lexer.line,
+                    char = lexer.char,
+                }
+                lexer_advance(lexer)
+
+            case '*':
+                if lexer.code[lexer.code_index + 1] == '=' {
+                    token = Token{
+                        type = .StarEqual,
+                        text = lexer.code[lexer.code_index:lexer.code_index + 2],
+                        line = lexer.line,
+                        char = lexer.char,
+                    }
+                    lexer_advance(lexer)
+                    lexer_advance(lexer)
+                }
+                else {
+                    token = Token{
+                        type = .Star,
+                        text = lexer.code[lexer.code_index:lexer.code_index + 1],
+                        line = lexer.line,
+                        char = lexer.char,
+                    }
+                    lexer_advance(lexer)
+                }
+
+            case '%':
+                if lexer.code[lexer.code_index + 1] == '=' {
+                    token = Token{
+                        type = .PercentEqual,
+                        text = lexer.code[lexer.code_index:lexer.code_index + 2],
+                        line = lexer.line,
+                        char = lexer.char,
+                    }
+                    lexer_advance(lexer)
+                    lexer_advance(lexer)
+                }
+                else {
+                    token = Token{
+                        type = .Percent,
+                        text = lexer.code[lexer.code_index:lexer.code_index + 1],
+                        line = lexer.line,
+                        char = lexer.char,
+                    }
+                    lexer_advance(lexer)
+                }
+
+            case '/':
+                if lexer.code[lexer.code_index + 1] == '/' {
+                    lexer_eat_until_newline(lexer)
+                    continue
+                }
+                else if lexer.code[lexer.code_index + 1] == '=' {
+                    token = Token{
+                        type = .SlashEqual,
+                        text = lexer.code[lexer.code_index:lexer.code_index + 2],
+                        line = lexer.line,
+                        char = lexer.char,
+                    }
+                    lexer_advance(lexer)
+                    lexer_advance(lexer)
+                }
+                else if lexer.code[lexer.code_index + 1] == '*' {
+                    lexer_eat_multiline_comment(lexer)
+                    continue
+                }
+                else {
+                    token = Token{
+                        type = .ForwardSlash,
+                        text = lexer.code[lexer.code_index:lexer.code_index + 1],
+                        line = lexer.line,
+                        char = lexer.char,
+                    }
+                    lexer_advance(lexer)
+                }
+
+            // @HACK: We skip preprocessor directives for now, since they are more complicated than we are ready for
+            case '#':
                 lexer_eat_until_newline(lexer)
-            }
-            else if lexer.code[lexer.code_index + 1] == '=' {
-                token = Token{
-                    type = .SlashEqual,
-                    text = lexer.code[lexer.code_index:lexer.code_index + 2],
-                    line = lexer.line,
-                    char = lexer.char,
-                }
-                lexer_advance(lexer)
-                lexer_advance(lexer)
-            }
-            else if lexer.code[lexer.code_index + 1] == '*' {
-                lexer_eat_multiline_comment(lexer)
-            }
-            else {
-                token = Token{
-                    type = .Slash,
-                    text = lexer.code[lexer.code_index:lexer.code_index + 1],
-                    line = lexer.line,
-                    char = lexer.char,
-                }
-                lexer_advance(lexer)
-            }
+                continue
 
-        // @HACK: We skip preprocessor directives for now, since they are more complicated than we are ready for
-        case '#':
-            lexer_eat_until_newline(lexer)
-
-        case '^':
-            if lexer.code[lexer.code_index + 1] == '=' {
-                token = Token{
-                    type = .CaratEqual,
-                    text = lexer.code[lexer.code_index:lexer.code_index + 2],
-                    line = lexer.line,
-                    char = lexer.char,
-                }
-                lexer_advance(lexer)
-                lexer_advance(lexer)
-            }
-            else {
-                token = Token{
-                    type = .Carat,
-                    text = lexer.code[lexer.code_index:lexer.code_index + 1],
-                    line = lexer.line,
-                    char = lexer.char,
-                }
-                lexer_advance(lexer)
-            }
-
-        case '+':
-            if lexer.code[lexer.code_index + 1] == '+' {
-                token = Token{
-                    type = .PlusPlus,
-                    text = lexer.code[lexer.code_index:lexer.code_index + 2],
-                    line = lexer.line,
-                    char = lexer.char,
-                }
-                lexer_advance(lexer)
-                lexer_advance(lexer)
-            }
-            else if lexer.code[lexer.code_index + 1] == '=' {
-                token = Token{
-                    type = .PlusEqual,
-                    text = lexer.code[lexer.code_index:lexer.code_index + 2],
-                    line = lexer.line,
-                    char = lexer.char,
-                }
-                lexer_advance(lexer)
-                lexer_advance(lexer)
-            }
-            else {
-                token = Token{
-                    type = .Plus,
-                    text = lexer.code[lexer.code_index:lexer.code_index + 1],
-                    line = lexer.line,
-                    char = lexer.char,
-                }
-                lexer_advance(lexer)
-            }
-
-        case ',':
-            token = Token{
-                type = .Comma,
-                text = lexer.code[lexer.code_index:lexer.code_index + 1],
-                line = lexer.line,
-                char = lexer.char,
-            }
-            lexer_advance(lexer)
-
-        case '>':
-            if lexer.code[lexer.code_index + 1] == '=' {
-                token = Token{
-                    type = .MoreEqual,
-                    text = lexer.code[lexer.code_index:lexer.code_index + 2],
-                    line = lexer.line,
-                    char = lexer.char,
-                }
-                lexer_advance(lexer)
-                lexer_advance(lexer)
-            }
-            else if lexer.code[lexer.code_index + 1] == '>' {
-                if lexer.code[lexer.code_index + 2] == '=' {
+            case '^':
+                if lexer.code[lexer.code_index + 1] == '=' {
                     token = Token{
-                        type = .MoreMoreEqual,
-                        text = lexer.code[lexer.code_index:lexer.code_index + 3],
-                        line = lexer.line,
-                        char = lexer.char,
-                    }
-                    lexer_advance(lexer)
-                    lexer_advance(lexer)
-                    lexer_advance(lexer)
-                }
-                else {
-                    token = Token{
-                        type = .MoreMore,
+                        type = .CaratEqual,
                         text = lexer.code[lexer.code_index:lexer.code_index + 2],
                         line = lexer.line,
                         char = lexer.char,
@@ -662,43 +605,20 @@ consume_token :: proc(lexer: ^Lexer) {
                     lexer_advance(lexer)
                     lexer_advance(lexer)
                 }
-            }
-            else {
-                token = Token{
-                    type = .More,
-                    text = lexer.code[lexer.code_index:lexer.code_index + 1],
-                    line = lexer.line,
-                    char = lexer.char,
-                }
-                lexer_advance(lexer)
-            }
-
-        case '<':
-            if lexer.code[lexer.code_index + 1] == '=' {
-                token = Token{
-                    type = .LessEqual,
-                    text = lexer.code[lexer.code_index:lexer.code_index + 2],
-                    line = lexer.line,
-                    char = lexer.char,
-                }
-                lexer_advance(lexer)
-                lexer_advance(lexer)
-            }
-            else if lexer.code[lexer.code_index + 1] == '>' {
-                if lexer.code[lexer.code_index + 2] == '=' {
+                else {
                     token = Token{
-                        type = .LessLessEqual,
-                        text = lexer.code[lexer.code_index:lexer.code_index + 3],
+                        type = .Carat,
+                        text = lexer.code[lexer.code_index:lexer.code_index + 1],
                         line = lexer.line,
                         char = lexer.char,
                     }
                     lexer_advance(lexer)
-                    lexer_advance(lexer)
-                    lexer_advance(lexer)
                 }
-                else {
+
+            case '+':
+                if lexer.code[lexer.code_index + 1] == '+' {
                     token = Token{
-                        type = .LessLess,
+                        type = .PlusPlus,
                         text = lexer.code[lexer.code_index:lexer.code_index + 2],
                         line = lexer.line,
                         char = lexer.char,
@@ -706,241 +626,411 @@ consume_token :: proc(lexer: ^Lexer) {
                     lexer_advance(lexer)
                     lexer_advance(lexer)
                 }
-            }
-            else {
+                else if lexer.code[lexer.code_index + 1] == '=' {
+                    token = Token{
+                        type = .PlusEqual,
+                        text = lexer.code[lexer.code_index:lexer.code_index + 2],
+                        line = lexer.line,
+                        char = lexer.char,
+                    }
+                    lexer_advance(lexer)
+                    lexer_advance(lexer)
+                }
+                else {
+                    token = Token{
+                        type = .Plus,
+                        text = lexer.code[lexer.code_index:lexer.code_index + 1],
+                        line = lexer.line,
+                        char = lexer.char,
+                    }
+                    lexer_advance(lexer)
+                }
+
+            case ',':
                 token = Token{
-                    type = .Less,
+                    type = .Comma,
                     text = lexer.code[lexer.code_index:lexer.code_index + 1],
                     line = lexer.line,
                     char = lexer.char,
                 }
                 lexer_advance(lexer)
-            }
 
-        case '&':
-            if lexer.code[lexer.code_index + 1] == '&' {
-                token = Token{
-                    type = .DoubleAnd,
-                    text = lexer.code[lexer.code_index:lexer.code_index + 2],
-                    line = lexer.line,
-                    char = lexer.char,
+            case '>':
+                if lexer.code[lexer.code_index + 1] == '=' {
+                    token = Token{
+                        type = .MoreEqual,
+                        text = lexer.code[lexer.code_index:lexer.code_index + 2],
+                        line = lexer.line,
+                        char = lexer.char,
+                    }
+                    lexer_advance(lexer)
+                    lexer_advance(lexer)
                 }
-                lexer_advance(lexer)
-                lexer_advance(lexer)
-            }
-            else if lexer.code[lexer.code_index + 1] == '=' {
-                token = Token{
-                    type = .AndEqual,
-                    text = lexer.code[lexer.code_index:lexer.code_index + 2],
-                    line = lexer.line,
-                    char = lexer.char,
+                else if lexer.code[lexer.code_index + 1] == '>' {
+                    if lexer.code[lexer.code_index + 2] == '=' {
+                        token = Token{
+                            type = .MoreMoreEqual,
+                            text = lexer.code[lexer.code_index:lexer.code_index + 3],
+                            line = lexer.line,
+                            char = lexer.char,
+                        }
+                        lexer_advance(lexer)
+                        lexer_advance(lexer)
+                        lexer_advance(lexer)
+                    }
+                    else {
+                        token = Token{
+                            type = .MoreMore,
+                            text = lexer.code[lexer.code_index:lexer.code_index + 2],
+                            line = lexer.line,
+                            char = lexer.char,
+                        }
+                        lexer_advance(lexer)
+                        lexer_advance(lexer)
+                    }
                 }
-                lexer_advance(lexer)
-                lexer_advance(lexer)
-            }
-            else {
-                token = Token{
-                    type = .And,
-                    text = lexer.code[lexer.code_index:lexer.code_index + 1],
-                    line = lexer.line,
-                    char = lexer.char,
+                else {
+                    token = Token{
+                        type = .More,
+                        text = lexer.code[lexer.code_index:lexer.code_index + 1],
+                        line = lexer.line,
+                        char = lexer.char,
+                    }
+                    lexer_advance(lexer)
                 }
-                lexer_advance(lexer)
-            }
 
-        case '|':
-            if lexer.code[lexer.code_index + 1] == '|' {
-                token = Token{
-                    type = .DoublePipe,
-                    text = lexer.code[lexer.code_index:lexer.code_index + 2],
-                    line = lexer.line,
-                    char = lexer.char,
+            case '<':
+                if lexer.code[lexer.code_index + 1] == '=' {
+                    token = Token{
+                        type = .LessEqual,
+                        text = lexer.code[lexer.code_index:lexer.code_index + 2],
+                        line = lexer.line,
+                        char = lexer.char,
+                    }
+                    lexer_advance(lexer)
+                    lexer_advance(lexer)
                 }
-                lexer_advance(lexer)
-                lexer_advance(lexer)
-            }
-            else if lexer.code[lexer.code_index + 1] == '=' {
-                token = Token{
-                    type = .PipeEqual,
-                    text = lexer.code[lexer.code_index:lexer.code_index + 2],
-                    line = lexer.line,
-                    char = lexer.char,
+                else if lexer.code[lexer.code_index + 1] == '<' {
+                    if lexer.code[lexer.code_index + 2] == '=' {
+                        token = Token{
+                            type = .LessLessEqual,
+                            text = lexer.code[lexer.code_index:lexer.code_index + 3],
+                            line = lexer.line,
+                            char = lexer.char,
+                        }
+                        lexer_advance(lexer)
+                        lexer_advance(lexer)
+                        lexer_advance(lexer)
+                    }
+                    else {
+                        token = Token{
+                            type = .LessLess,
+                            text = lexer.code[lexer.code_index:lexer.code_index + 2],
+                            line = lexer.line,
+                            char = lexer.char,
+                        }
+                        lexer_advance(lexer)
+                        lexer_advance(lexer)
+                    }
                 }
-                lexer_advance(lexer)
-                lexer_advance(lexer)
-            }
-            else {
-                token = Token{
-                    type = .Pipe,
-                    text = lexer.code[lexer.code_index:lexer.code_index + 1],
-                    line = lexer.line,
-                    char = lexer.char,
+                else {
+                    token = Token{
+                        type = .Less,
+                        text = lexer.code[lexer.code_index:lexer.code_index + 1],
+                        line = lexer.line,
+                        char = lexer.char,
+                    }
+                    lexer_advance(lexer)
                 }
-                lexer_advance(lexer)
-            }
 
-        case '=':
-            if lexer.code[lexer.code_index + 1] == '=' {
-                token = Token{
-                    type = .DoubleEqual,
-                    text = lexer.code[lexer.code_index:lexer.code_index + 2],
-                    line = lexer.line,
-                    char = lexer.char,
+            case '&':
+                if lexer.code[lexer.code_index + 1] == '&' {
+                    token = Token{
+                        type = .DoubleAnd,
+                        text = lexer.code[lexer.code_index:lexer.code_index + 2],
+                        line = lexer.line,
+                        char = lexer.char,
+                    }
+                    lexer_advance(lexer)
+                    lexer_advance(lexer)
                 }
-                lexer_advance(lexer)
-                lexer_advance(lexer)
-            }
-            else {
-                token = Token{
-                    type = .Equal,
-                    text = lexer.code[lexer.code_index:lexer.code_index + 1],
-                    line = lexer.line,
-                    char = lexer.char,
+                else if lexer.code[lexer.code_index + 1] == '=' {
+                    token = Token{
+                        type = .AndEqual,
+                        text = lexer.code[lexer.code_index:lexer.code_index + 2],
+                        line = lexer.line,
+                        char = lexer.char,
+                    }
+                    lexer_advance(lexer)
+                    lexer_advance(lexer)
                 }
-                lexer_advance(lexer)
-            }
+                else {
+                    token = Token{
+                        type = .And,
+                        text = lexer.code[lexer.code_index:lexer.code_index + 1],
+                        line = lexer.line,
+                        char = lexer.char,
+                    }
+                    lexer_advance(lexer)
+                }
 
-        case: lex_error(lexer)
+            case '|':
+                if lexer.code[lexer.code_index + 1] == '|' {
+                    token = Token{
+                        type = .DoublePipe,
+                        text = lexer.code[lexer.code_index:lexer.code_index + 2],
+                        line = lexer.line,
+                        char = lexer.char,
+                    }
+                    lexer_advance(lexer)
+                    lexer_advance(lexer)
+                }
+                else if lexer.code[lexer.code_index + 1] == '=' {
+                    token = Token{
+                        type = .PipeEqual,
+                        text = lexer.code[lexer.code_index:lexer.code_index + 2],
+                        line = lexer.line,
+                        char = lexer.char,
+                    }
+                    lexer_advance(lexer)
+                    lexer_advance(lexer)
+                }
+                else {
+                    token = Token{
+                        type = .Pipe,
+                        text = lexer.code[lexer.code_index:lexer.code_index + 1],
+                        line = lexer.line,
+                        char = lexer.char,
+                    }
+                    lexer_advance(lexer)
+                }
+
+            case '=':
+                if lexer.code[lexer.code_index + 1] == '=' {
+                    token = Token{
+                        type = .DoubleEqual,
+                        text = lexer.code[lexer.code_index:lexer.code_index + 2],
+                        line = lexer.line,
+                        char = lexer.char,
+                    }
+                    lexer_advance(lexer)
+                    lexer_advance(lexer)
+                }
+                else {
+                    token = Token{
+                        type = .Equal,
+                        text = lexer.code[lexer.code_index:lexer.code_index + 1],
+                        line = lexer.line,
+                        char = lexer.char,
+                    }
+                    lexer_advance(lexer)
+                }
+
+            case: lex_error(lexer)
+        }
+        break
     }
 
     push_to_consumed(lexer, token)
 }
 
-get_token :: proc(lexer: ^Lexer) -> Token {
+take_token :: proc(lexer: ^Lexer) -> Token {
     if consumed_is_empty(lexer) {
         consume_token(lexer)
     }
 
-    token := peek_from_consumed(lexer)
+    token := consumed_at(lexer, 0)
     if token.type == .EndOfFile {
         return token
     }
     else {
-        return pop_from_consumed(lexer)
+        token := pop_from_consumed(lexer)
+        return token 
     }
 }
 
-peek_token :: proc(lexer: ^Lexer) -> Token {
-    if consumed_is_empty(lexer) {
+look_ahead :: proc(lexer: ^Lexer, steps: int) -> Token {
+    assert(steps < CONSUMED_SIZE)
+    for consumed_len(lexer) < steps {
         consume_token(lexer)
     }
-    return peek_from_consumed(lexer)
+    return consumed_at(lexer, steps - 1)
 }
 
-/*
-take_first_token :: proc(tokens: []Token) -> (token: Token, rest: []Token) {
-    if len(tokens) == 0 do parse_error(token, tokens)
-    return slice.split_first(tokens)
+Parser :: struct {
+    lexer: Lexer,
 }
 
-peek_first_token :: proc(tokens: []Token) -> Token {
-    if len(tokens) == 0 do parse_error({}, {})
-    return tokens[0]
-}
-
-parse_error :: proc(current: Token, rest: []Token, location := #caller_location) {
-    fmt.printfln("Unsuccessful parse in %v:%v", location.procedure, location.line)
-    fmt.printfln("Current token: %v", current)
-    fmt.printfln("The rest: %v", rest)
+parse_error :: proc(parser: ^Parser, message: string) {
+    fmt.printfln("%v(%v:%v) Parse error! %v", parser.lexer.file, parser.lexer.line + 1, parser.lexer.char + 1, message)
     os.exit(3)
 }
 
-parse_expression_leaf :: proc(tokens: []Token) -> (^Ast_Node, []Token) {
-    token := peek_first_token(tokens)
-    tokens := tokens
+parse_program :: proc(parser: ^Parser) -> Program {
+    children := make([dynamic]^Ast_Node)
 
-    #partial switch token.type {
-        case .Minus:
-            inner: ^Ast_Node = ---
-            inner, tokens = parse_expression_leaf(tokens[1:])
-            return make_node_1(Negate_Node, inner), tokens
-
-        case .Tilde:
-            inner: ^Ast_Node = ---
-            inner, tokens = parse_expression_leaf(tokens[1:])
-            return make_node_1(Bit_Negate_Node, inner), tokens
-
-        case .Bang:
-            inner: ^Ast_Node = ---
-            inner, tokens = parse_expression_leaf(tokens[1:])
-            return make_node_1(Boolean_Negate_Node, inner), tokens
-
-        case .MinusMinus:
-            inner: ^Ast_Node = ---
-            inner, tokens = parse_expression_leaf(tokens[1:])
-            return make_node_1(Pre_Decrement_Node, inner), tokens
-
-        case .PlusPlus:
-            inner: ^Ast_Node = ---
-            inner, tokens = parse_expression_leaf(tokens[1:])
-            return make_node_1(Pre_Increment_Node, inner), tokens
-
-        case .IntConstant:
-            inner := make_node_1(Int_Constant_Node, token.data.(int))
-            return parse_postfix_operators(inner, tokens[1:])
-
-        case .Ident:
-            name := token.text
-            token := peek_first_token(tokens[1:])
-
-            if token.type == .LParen {
-                // Parse a function call
-                tokens = tokens[2:]
-                params := make([dynamic]^Ast_Node)
-                token = peek_first_token(tokens)
-
-                if token.type != .RParen {
-                    expr: ^Ast_Node = ---
-                    expr, tokens = parse_expression(tokens)
-                    append(&params, expr)
-                    for token, tokens = take_first_token(tokens); token.type != .RParen; token, tokens = take_first_token(tokens) {
-                        if token.type != .Comma do parse_error(token, tokens)
-                        expr, tokens = parse_expression(tokens)
-                        append(&params, expr)
-                    }
-                }
-                else {
-                    tokens = tokens[1:]
-                }
-
-                return make_node_2(Function_Call_Node, name, params), tokens
-            }
-            else {
-                inner := make_node_1(Ident_Node, name)
-                return parse_postfix_operators(inner, tokens[1:])
-            }
-
-        case .LParen:
-            expr: ^Ast_Node = ---
-            expr, tokens = parse_expression(tokens[1:])
-            token, tokens = take_first_token(tokens)
-            if token.type != .RParen do parse_error(token, tokens)
-            return parse_postfix_operators(expr, tokens)
-
-        case:
-            parse_error(token, tokens)
+    for {
+        next_token := look_ahead(&parser.lexer, 1)
+        if next_token.type == .EndOfFile do break
+        function := parse_function_definition_or_declaration(parser)
+        append(&children, function)
     }
 
+    return Program{children}
+}
+
+parse_function_definition_or_declaration :: proc(parser: ^Parser) -> ^Ast_Node {
+    signature := parse_function_signature(parser)
+
+    token := take_token(&parser.lexer)
+    if token.type == .Semicolon {
+        return make_node_2(Function_Declaration_Node, signature.name, signature.params)
+    }
+
+    if token.type != .LBrace do parse_error(parser, "Expected a semicolon or block item list after function signature.")
+    body := parse_block_item_list(parser)
+    return make_node_3(Function_Definition_Node, signature.name, signature.params, body)
+}
+
+Function_Signature :: struct {
+    name: string,
+    params: [dynamic]string,
+}
+
+parse_function_signature :: proc(parser: ^Parser) -> Function_Signature {
+    token := take_token(&parser.lexer)
+    if token.type != .IntKeyword do parse_error(parser, "Expected 'int' as start of function signature.")
+
+    token = take_token(&parser.lexer)
+    if token.type != .Ident do parse_error(parser, "Expected an identifier in function signature.")
+    name := token.text
+
+    token = take_token(&parser.lexer)
+    if token.type != .LParen do parse_error(parser, "Expected parameters in function signature.")
+
+    params := make([dynamic]string)
+    token = take_token(&parser.lexer)
+    if token.type == .IntKeyword {
+        token = take_token(&parser.lexer)
+        if token.type != .Ident do parse_error(parser, "Expected an identifier after parameter type.")
+        append(&params, token.text)
+        for {
+            token = take_token(&parser.lexer)
+            if token.type == .RParen do break
+
+            if token.type != .Comma do parse_error(parser, "Expected a comma separating function parameters.")
+            token = take_token(&parser.lexer)
+            if token.type != .IntKeyword do parse_error(parser, "Expected a type preceding function parameter.")
+            token = take_token(&parser.lexer)
+            if token.type != .Ident do parse_error(parser, "Expected an identifier after parameter type.")
+            append(&params, token.text)
+        }
+    }
+    else if token.type == .VoidKeyword {
+        token = take_token(&parser.lexer)
+        if token.type != .RParen do parse_error(parser, "If signatures contain 'void', they must not contain any other parameters.")
+    }
+
+    return Function_Signature{name, params}
+}
+
+parse_block_item_list :: proc(parser: ^Parser) -> [dynamic]^Ast_Node {
+    list := make([dynamic]^Ast_Node)
+    for {
+        token := look_ahead(&parser.lexer, 1)
+        if token.type == .RBrace do break
+
+        // Skip null statements
+        if token.type == .Semicolon {
+            take_token(&parser.lexer)
+            continue
+        }
+
+        block_item := parse_block_item(parser)
+        append(&list, block_item)
+    }
+
+    token := take_token(&parser.lexer)
+    if token.type != .RBrace do parse_error(parser, "Expected a '}' after block item list.")
+    return list
+}
+
+parse_block_item :: proc(parser: ^Parser) -> ^Ast_Node {
+    labels := parse_labels(parser)
+
+    #partial switch look_ahead(&parser.lexer, 1).type {
+        case .IntKeyword:
+            if len(labels) > 0 do parse_error(parser, "Declarations cannot have labels.")
+            token_1 := look_ahead(&parser.lexer, 2)
+            token_2 := look_ahead(&parser.lexer, 3)
+            if token_1.type != .Ident do parse_error(parser, "Expected an identifier after type.")
+            var_name := token_1.text
+
+            if token_2.type == .Semicolon {
+                take_token(&parser.lexer)
+                take_token(&parser.lexer)
+                take_token(&parser.lexer)
+                return make_node_1(Decl_Node, var_name)
+            }
+            else if token_2.type == .Equal {
+                take_token(&parser.lexer)
+                take_token(&parser.lexer)
+                take_token(&parser.lexer)
+                right := parse_expression(parser)
+                statement := make_node_2(Decl_Assign_Node, var_name, right)
+                token := take_token(&parser.lexer)
+                if token.type != .Semicolon do parse_error(parser, "Expected a semicolon after statement.")
+                return statement
+            }
+            else if token_2.type == .LParen {
+                return parse_function_declaration(parser)
+            }
+            else {
+                parse_error(parser, "Expected a function or variable declaration.")
+            }
+
+        case:
+            return parse_statement(parser, labels)
+    }
+    
     panic("Unreachable")
 }
 
-parse_postfix_operators :: proc(inner: ^Ast_Node, tokens: []Token) -> (^Ast_Node, []Token) {
-    inner := inner
-    tokens := tokens
+parse_labels :: proc(parser: ^Parser) -> [dynamic]Label {
+    labels := make([dynamic]Label)
 
-    for token := peek_first_token(tokens); token.type == .PlusPlus || token.type == .MinusMinus; token = peek_first_token(tokens) {
-        if token.type == .PlusPlus {
-            op := make_node_1(Post_Increment_Node, inner)
-            inner = op
+    loop: for {
+        token := look_ahead(&parser.lexer, 1) 
+        #partial switch token.type {
+            case .DefaultKeyword:
+                take_token(&parser.lexer)
+                token = take_token(&parser.lexer)
+                if token.type != .Colon do parse_error(parser, "Expected a colon after label.")
+                append(&labels, Default_Label{})
+
+            case .CaseKeyword:
+                take_token(&parser.lexer)
+                token = take_token(&parser.lexer)
+                if token.type == .Colon do parse_error(parser, "Expected a constant in 'case' label")
+                if token.type != .IntConstant do semantic_error() // @Temporary
+                constant := token.data.(int)
+                token = take_token(&parser.lexer)
+                if token.type != .Colon do parse_error(parser, "Expected a colon after label.")
+                append(&labels, constant)
+
+            case .Ident:
+                next := look_ahead(&parser.lexer, 2)
+                if next.type != .Colon do break loop
+                take_token(&parser.lexer)
+                take_token(&parser.lexer)
+                append(&labels, token.text)
+
+            case:
+                break loop
         }
-        else {
-            op := make_node_1(Post_Decrement_Node, inner)
-            inner = op
-        }
-        tokens = tokens[1:]
     }
 
-    return inner, tokens
+    return labels
 }
 
 op_precs := map[Token_Type]int {
@@ -1110,181 +1200,87 @@ make_binary_op_node :: proc(type: Token_Type, left: ^Ast_Node, right: ^Ast_Node)
     return node 
 }
 
-parse_expression :: proc(tokens: []Token, min_prec := 0) -> (^Ast_Node, []Token) {
-    leaf, tokens := parse_expression_leaf(tokens)
-    token := peek_first_token(tokens)
+parse_expression :: proc(parser: ^Parser, min_prec := 0) -> ^Ast_Node {
+    leaf := parse_expression_leaf(parser)
+    token := look_ahead(&parser.lexer, 1)
 
     for (token.type in assign_ops || token.type in bin_ops || token.type == .QuestionMark) \
         && op_precs[token.type] >= min_prec {
-        if (token.type in assign_ops) {
 
+        take_token(&parser.lexer)
+        if (token.type in assign_ops) {
             prec := op_precs[token.type]
-            right: ^Ast_Node = ---
-            right, tokens = parse_expression(tokens[1:], prec)
+            right := parse_expression(parser, prec)
             op := make_binary_op_node(token.type, leaf, right)
             leaf = op
         }
         else if token.type in bin_ops {
             prec := op_precs[token.type]
-            right: ^Ast_Node = ---
             // @TODO: Handle associativity here (see https://eli.thegreenplace.net/2012/08/02/parsing-expressions-by-precedence-climbing)
-            right, tokens = parse_expression(tokens[1:], prec + 1)
+            right := parse_expression(parser, prec + 1)
             op := make_binary_op_node(token.type, leaf, right)
             leaf = op
         }
         else {
             prec := op_precs[token.type]
-            if_true: ^Ast_Node = ---
-            if_false: ^Ast_Node = ---
-            if_true, tokens = parse_expression(tokens[1:])
-            token, tokens = take_first_token(tokens)
-            if token.type != .Colon do parse_error(token, tokens)
-            if_false, tokens = parse_expression(tokens, prec)
+            if_true := parse_expression(parser)
+            token = take_token(&parser.lexer)
+            if token.type != .Colon do parse_error(parser, "Expected a colon after ternary condition.")
+            if_false := parse_expression(parser, prec)
             op := make_node_3(Ternary_Node, leaf, if_true, if_false)
             leaf = op
         }
 
-        token = peek_first_token(tokens)
+        token = look_ahead(&parser.lexer, 1)
     }
 
-    return leaf, tokens
+    return leaf
 }
 
-parse_labels :: proc(tokens: []Token) -> ([dynamic]Label, []Token) {
-    tokens := tokens
-    labels := make([dynamic]Label)
-
-    for {
-        token := peek_first_token(tokens)
-        if token.type == .DefaultKeyword {
-            token, tokens = take_first_token(tokens[1:])
-            if token.type != .Colon do parse_error(token, tokens)
-            append(&labels, Default_Label{})
-        }
-        else if token.type == .CaseKeyword {
-            token, tokens = take_first_token(tokens[1:])
-            if token.type == .Colon do parse_error(token, tokens)
-            if token.type != .IntConstant do semantic_error()
-            constant := token.data.(int)
-            token, tokens = take_first_token(tokens)
-            if token.type != .Colon do parse_error(token, tokens)
-            append(&labels, constant)
-        }
-        else if token.type == .Ident && tokens[1].type == .Colon {
-            tokens = tokens[2:]        
-            append(&labels, token.text)
-        }
-        else do break
-    }
-
-    return labels, tokens
+semantic_error :: proc(location := #caller_location) {
+    fmt.printfln("Semantic error in %v", location)
+    os.exit(4)
 }
 
-parse_for_precondition :: proc(tokens: []Token) -> (^Ast_Node, []Token) {
-    token := peek_first_token(tokens)
+parse_function_declaration :: proc(parser: ^Parser) -> ^Ast_Node {
+    signature := parse_function_signature(parser)
 
-    #partial switch token.type {
-        case .IntKeyword:
-            token_1 := peek_first_token(tokens[1:])
-            token_2 := peek_first_token(tokens[2:])
-            if token_1.type != .Ident do parse_error(token, tokens)
-            var_name := token_1.text
-
-            if token_2.type == .Semicolon {
-                statement := make_node_1(Decl_Node, var_name)
-                return statement, tokens[3:]
-            }
-            else if token_2.type == .Equal {
-                right, tokens := parse_expression(tokens[3:])
-                statement := make_node_2(Decl_Assign_Node, var_name, right)
-                token, tokens = take_first_token(tokens)
-                if token.type != .Semicolon do parse_error(token, tokens)
-                return statement, tokens
-            }
-            else {
-                parse_error(token, tokens)
-            }
-
-        case:
-            return parse_statement(tokens)
-    }
-    
-    panic("Unreachable")
+    token := take_token(&parser.lexer)
+    if token.type != .Semicolon do parse_error(parser, "Expected a semicolon after function declaration.")
+    return make_node_2(Function_Declaration_Node, signature.name, signature.params)
 }
 
-parse_block_statement :: proc(tokens: []Token) -> (^Ast_Node, []Token) {
-    labels, tokens := parse_labels(tokens)
-    token := peek_first_token(tokens)
-
-    #partial switch token.type {
-        case .IntKeyword:
-            if len(labels) > 0 do parse_error(token, tokens)
-            token_1 := peek_first_token(tokens[1:])
-            token_2 := peek_first_token(tokens[2:])
-            if token_1.type != .Ident do parse_error(token, tokens)
-            var_name := token_1.text
-
-            if token_2.type == .Semicolon {
-                statement := make_node_1(Decl_Node, var_name)
-                return statement, tokens[3:]
-            }
-            else if token_2.type == .Equal {
-                right: ^Ast_Node = ---
-                right, tokens = parse_expression(tokens[3:])
-                statement := make_node_2(Decl_Assign_Node, var_name, right)
-                token, tokens = take_first_token(tokens)
-                if token.type != .Semicolon do parse_error(token, tokens)
-                return statement, tokens
-            }
-            else if token_2.type == .LParen {
-                return parse_function_declaration(tokens)
-            }
-            else {
-                parse_error(token, tokens)
-            }
-
-        case:
-            return parse_statement(tokens, labels)
-    }
-    
-    panic("Unreachable")
-}
-
-parse_statement :: proc(tokens: []Token, labels: [dynamic]Label = nil) -> (^Ast_Node, []Token) {
-    tokens := tokens
+parse_statement :: proc(parser: ^Parser, labels: [dynamic]Label = nil) -> ^Ast_Node {
     labels := labels
     if labels == nil {
-        labels, tokens = parse_labels(tokens)
+        labels = parse_labels(parser)
     }
-    token := peek_first_token(tokens)
+    token := look_ahead(&parser.lexer, 1)
 
     result: ^Ast_Node = ---
 
     #partial switch token.type {
         case .ReturnKeyword:
-            tokens = tokens[1:]
-            expr: ^Ast_Node = ---
-            expr, tokens = parse_expression(tokens)
+            take_token(&parser.lexer)
+            expr := parse_expression(parser)
             result = make_node_1(Return_Node, expr)
-            token, tokens = take_first_token(tokens)
-            if token.type != .Semicolon do parse_error(token, tokens)
+            token = take_token(&parser.lexer)
+            if token.type != .Semicolon do parse_error(parser, "Expected a semicolon after 'return' statement.")
 
         case .IfKeyword:
-            tokens = tokens[1:]
-            token, tokens = take_first_token(tokens)
-            if token.type != .LParen do parse_error(token, tokens)
-            condition: ^Ast_Node = ---
-            condition, tokens = parse_expression(tokens)
-            token, tokens = take_first_token(tokens)
-            if token.type != .RParen do parse_error(token, tokens)
+            take_token(&parser.lexer)
+            token = take_token(&parser.lexer)
+            if token.type != .LParen do parse_error(parser, "Expected a '(' before if condition.")
+            condition := parse_expression(parser)
+            token = take_token(&parser.lexer)
+            if token.type != .RParen do parse_error(parser, "Expected a ')' after if condition.")
 
-            if_true: ^Ast_Node = ---
-            if_true, tokens = parse_statement(tokens)
+            if_true := parse_statement(parser)
 
-            token = peek_first_token(tokens)
+            token = look_ahead(&parser.lexer, 1)
             if token.type == .ElseKeyword {
-                if_false: ^Ast_Node = ---
-                if_false, tokens = parse_statement(tokens[1:])
+                take_token(&parser.lexer)
+                if_false := parse_statement(parser)
                 result = make_node_3(If_Else_Node, condition, if_true, if_false)
             }
             else {
@@ -1292,174 +1288,249 @@ parse_statement :: proc(tokens: []Token, labels: [dynamic]Label = nil) -> (^Ast_
             }
 
         case .GotoKeyword:
-            tokens = tokens[1:]
-            token, tokens = take_first_token(tokens)
-            if token.type != .Ident do parse_error(token, tokens)
+            take_token(&parser.lexer)
+            token = take_token(&parser.lexer)
+            if token.type != .Ident do parse_error(parser, "Expected a label name after 'goto'.")
             label := token.text
-            token, tokens = take_first_token(tokens)
-            if token.type != .Semicolon do parse_error(token, tokens)
+            token = take_token(&parser.lexer)
+            if token.type != .Semicolon do parse_error(parser, "Expected a semicolon after 'goto' statement.")
             result = make_node_1(Goto_Node, label)
 
         case .WhileKeyword:
-            tokens = tokens[1:]
-            token, tokens = take_first_token(tokens)
-            if token.type != .LParen do parse_error(token, tokens)
-            condition: ^Ast_Node = ---
-            condition, tokens = parse_expression(tokens)
-            token, tokens = take_first_token(tokens)
-            if token.type != .RParen do parse_error(token, tokens)
-            if_true: ^Ast_Node = ---
-            if_true, tokens = parse_statement(tokens)
+            take_token(&parser.lexer)
+            token = take_token(&parser.lexer)
+            if token.type != .LParen do parse_error(parser, "Expected a '(' before loop condition.")
+            condition := parse_expression(parser)
+            token = take_token(&parser.lexer)
+            if token.type != .RParen do parse_error(parser, "Expected a ')' after loop condition.")
+            if_true := parse_statement(parser)
             result = make_node_2(While_Node, condition, if_true)
 
         case .DoKeyword:
-            tokens = tokens[1:]
-            if_true: ^Ast_Node = ---
-            if_true, tokens = parse_statement(tokens)
-            token, tokens = take_first_token(tokens)
-            if token.type != .WhileKeyword do parse_error(token, tokens)
-            token, tokens = take_first_token(tokens)
-            if token.type != .LParen do parse_error(token, tokens)
-            condition: ^Ast_Node = ---
-            condition, tokens = parse_expression(tokens)
-            token, tokens = take_first_token(tokens)
-            if token.type != .RParen do parse_error(token, tokens)
+            take_token(&parser.lexer)
+            if_true := parse_statement(parser)
+            token = take_token(&parser.lexer)
+            if token.type != .WhileKeyword do parse_error(parser, "Expected a 'while' after 'do' loop body.")
+            token = take_token(&parser.lexer)
+            if token.type != .LParen do parse_error(parser, "Expected a '(' before loop condition.")
+            condition := parse_expression(parser)
+            token = take_token(&parser.lexer)
+            if token.type != .RParen do parse_error(parser, "Expected a ')' after loop condition.")
             result = make_node_2(Do_While_Node, condition, if_true)
-            token, tokens := take_first_token(tokens)
-            if token.type != .Semicolon do parse_error(token, tokens)
+            token = take_token(&parser.lexer)
+            if token.type != .Semicolon do parse_error(parser, "Expected a semicolon after 'do' loop.")
 
         case .ForKeyword:
-            tokens = tokens[1:]
-            token, tokens = take_first_token(tokens)
-            if token.type != .LParen do parse_error(token, tokens)
-            pre_condition: ^Ast_Node = ---
-            pre_condition, tokens = parse_for_precondition(tokens)
+            take_token(&parser.lexer)
+            token = take_token(&parser.lexer)
+            if token.type != .LParen do parse_error(parser, "Expected a '(' before loop conditions.")
+            pre_condition := parse_for_precondition(parser)
+            token = take_token(&parser.lexer)
+            if token.type != .Semicolon do parse_error(parser, "Expected a semicolon after loop precondition.")
 
             condition: ^Ast_Node = ---
-            token = peek_first_token(tokens)
+            token = look_ahead(&parser.lexer, 1)
             if token.type == .Semicolon {
                 condition = make_node_1(Int_Constant_Node, 1) // If expression is empty, replace it with a condition that is always true
             }
             else {
-                condition, tokens = parse_expression(tokens)
+                condition = parse_expression(parser)
             }
-            token, tokens = take_first_token(tokens)
-            if token.type != .Semicolon do parse_error(token, tokens)
+            token = take_token(&parser.lexer)
+            if token.type != .Semicolon do parse_error(parser, "Expected a semicolon after 'for' loop condition.")
 
             post_condition: ^Ast_Node
-            token = peek_first_token(tokens)
+            token = look_ahead(&parser.lexer, 1)
             if token.type != .RParen {
-                post_condition, tokens = parse_expression(tokens)
+                post_condition = parse_expression(parser)
             }
-            token, tokens = take_first_token(tokens)
 
-            if token.type != .RParen do parse_error(token, tokens)
-            if_true: ^Ast_Node = ---
-            if_true, tokens = parse_statement(tokens)
+            token = take_token(&parser.lexer)
+            if token.type != .RParen do parse_error(parser, "Expected a ')' after loop conditions.")
+            if_true := parse_statement(parser)
             result = make_node_4(For_Node, pre_condition, condition, post_condition, if_true)
 
         case .ContinueKeyword:
-            token, tokens = take_first_token(tokens[1:])
-            if token.type != .Semicolon do parse_error(token, tokens)
+            take_token(&parser.lexer)
+            token = take_token(&parser.lexer)
+            if token.type != .Semicolon do parse_error(parser, "Expected a semicolon after 'continue' statement.")
             result = make_node_0(Continue_Node)
 
         case .BreakKeyword:
-            token, tokens = take_first_token(tokens[1:])
-            if token.type != .Semicolon do parse_error(token, tokens)
+            take_token(&parser.lexer)
+            token = take_token(&parser.lexer)
+            if token.type != .Semicolon do parse_error(parser, "Expected a semicolon after 'break' statement.")
             result = make_node_0(Break_Node)
 
         case .SwitchKeyword:
-            token, tokens = take_first_token(tokens[1:])
-            if token.type != .LParen do parse_error(token, tokens)
-            expr: ^Ast_Node = ---
-            expr, tokens = parse_expression(tokens)
-            token, tokens = take_first_token(tokens)
-            if token.type != .RParen do parse_error(token, tokens)
-            block: ^Ast_Node = ---
-            block, tokens = parse_statement(tokens)
+            take_token(&parser.lexer)
+            token = take_token(&parser.lexer)
+            if token.type != .LParen do parse_error(parser, "Expected a '(' before 'switch' expression.")
+            expr := parse_expression(parser)
+            token = take_token(&parser.lexer)
+            if token.type != .RParen do parse_error(parser, "Expected a ')' after 'switch' expression.")
+            block := parse_statement(parser) //@TODO: This is not correct. Switch bodiess must be compound statements
             result = make_node_2(Switch_Node, expr, block)
 
         case .Semicolon:
-            tokens = tokens[1:]
+            take_token(&parser.lexer)
             result = make_node_0(Null_Statement_Node)
 
         case .LBrace:
-            statements: [dynamic]^Ast_Node = ---
-            statements, tokens = parse_block_statement_list(tokens[1:])
+            take_token(&parser.lexer)
+            statements := parse_block_item_list(parser)
             result = make_node_1(Compound_Statement_Node, statements)
 
         case:
-            result, tokens = parse_expression(tokens)
-            token, tokens = take_first_token(tokens)
-            if token.type != .Semicolon do parse_error(token, tokens)
+            result = parse_expression(parser)
+            token = take_token(&parser.lexer)
+            if token.type != .Semicolon do parse_error(parser, "Expected a semicolon after expression statement.")
     }
 
     result.labels = labels
-    return result, tokens
+    return result
 }
 
-parse_block_statement_list :: proc(tokens: []Token) -> ([dynamic]^Ast_Node, []Token) {
-    tokens := tokens
-    list := make([dynamic]^Ast_Node)
-    for token := peek_first_token(tokens); token.type != .RBrace; token = peek_first_token(tokens) {
-        // Skip null statements
-        if token.type == .Semicolon {
-            tokens = tokens[1:]
-            continue
-        }
-        block_statement: ^Ast_Node = ---
-        block_statement, tokens = parse_block_statement(tokens)
-        append(&list, block_statement)
+parse_expression_leaf :: proc(parser: ^Parser) -> ^Ast_Node {
+    token := look_ahead(&parser.lexer, 1)
+
+    #partial switch token.type {
+        case .Minus:
+            take_token(&parser.lexer)
+            inner := parse_expression_leaf(parser)
+            return make_node_1(Negate_Node, inner)
+
+        case .Tilde:
+            take_token(&parser.lexer)
+            inner := parse_expression_leaf(parser)
+            return make_node_1(Bit_Negate_Node, inner)
+
+        case .Bang:
+            take_token(&parser.lexer)
+            inner := parse_expression_leaf(parser)
+            return make_node_1(Boolean_Negate_Node, inner)
+
+        case .MinusMinus:
+            take_token(&parser.lexer)
+            inner := parse_expression_leaf(parser)
+            return make_node_1(Pre_Decrement_Node, inner)
+
+        case .PlusPlus:
+            take_token(&parser.lexer)
+            inner := parse_expression_leaf(parser)
+            return make_node_1(Pre_Increment_Node, inner)
+
+        case .IntConstant:
+            take_token(&parser.lexer)
+            inner := make_node_1(Int_Constant_Node, token.data.(int))
+            return parse_postfix_operators(parser, inner)
+
+        case .Ident:
+            name := token.text
+            token = look_ahead(&parser.lexer, 2)
+
+            if token.type == .LParen {
+                // Parse a function call
+                take_token(&parser.lexer)
+                take_token(&parser.lexer)
+                params := make([dynamic]^Ast_Node)
+                token = look_ahead(&parser.lexer, 1)
+
+                if token.type != .RParen {
+                    expr := parse_expression(parser)
+                    append(&params, expr)
+                    for {
+                        token = take_token(&parser.lexer)
+                        if token.type == .RParen do break
+
+                        if token.type != .Comma do parse_error(parser, "Expected a ',' separating function arguments.")
+                        expr := parse_expression(parser)
+                        append(&params, expr)
+                    }
+                }
+                else {
+                    take_token(&parser.lexer)
+                }
+
+                return make_node_2(Function_Call_Node, name, params)
+            }
+            else {
+                take_token(&parser.lexer)
+                inner := make_node_1(Ident_Node, name)
+                return parse_postfix_operators(parser, inner)
+            }
+
+        case .LParen:
+            take_token(&parser.lexer)
+            expr := parse_expression(parser)
+            token = take_token(&parser.lexer)
+            if token.type != .RParen do parse_error(parser, "Mismatched brackets in expression.")
+            return parse_postfix_operators(parser, expr)
+
+        case:
+            parse_error(parser, "Expected an expression term.")
     }
 
-    token: Token = ---
-    token, tokens = take_first_token(tokens)
-    if token.type != .RBrace do parse_error(token, tokens)
-
-    return list, tokens
+    panic("Unreachable")
 }
 
-Function_Signature :: struct {
-    name: string,
-    params: [dynamic]string,
-}
+parse_for_precondition :: proc(parser: ^Parser) -> ^Ast_Node {
+    token := look_ahead(&parser.lexer, 1)
 
-parse_function_signature :: proc(tokens: []Token) -> (Function_Signature, []Token) {
-    tokens := tokens
-    token: Token = ---
-
-    token, tokens = take_first_token(tokens)
-    if token.type != .IntKeyword do parse_error(token, tokens)
-
-    token, tokens = take_first_token(tokens)
-    if token.type != .Ident do parse_error(token, tokens)
-    name := token.text
-
-    token, tokens = take_first_token(tokens)
-    if token.type != .LParen do parse_error(token, tokens)
-    params := make([dynamic]string)
-    token, tokens = take_first_token(tokens)
     if token.type == .IntKeyword {
-        token, tokens = take_first_token(tokens)
-        if token.type != .Ident do parse_error(token, tokens)
-        append(&params, token.text)
-        for token, tokens = take_first_token(tokens); token.type != .RParen; token, tokens = take_first_token(tokens) {
-            if token.type != .Comma do parse_error(token, tokens)
-            token, tokens = take_first_token(tokens)
-            if token.type != .IntKeyword do parse_error(token, tokens)
-            token, tokens = take_first_token(tokens)
-            if token.type != .Ident do parse_error(token, tokens)
-            append(&params, token.text)
+        token_1 := look_ahead(&parser.lexer, 2)
+        token_2 := look_ahead(&parser.lexer, 3)
+        if token_1.type != .Ident do parse_error(parser, "Expected an identifier in declaration.")
+        var_name := token_1.text
+
+        if token_2.type == .Semicolon {
+            take_token(&parser.lexer)
+            take_token(&parser.lexer)
+            take_token(&parser.lexer)
+            statement := make_node_1(Decl_Node, var_name)
+            return statement
+        }
+        else if token_2.type == .Equal {
+            take_token(&parser.lexer)
+            take_token(&parser.lexer)
+            take_token(&parser.lexer)
+            right := parse_expression(parser)
+            statement := make_node_2(Decl_Assign_Node, var_name, right)
+            return statement
+        }
+        else {
+            parse_error(parser, "Invalid 'for' loop precondition.")
         }
     }
-    else if token.type == .VoidKeyword {
-        token, tokens = take_first_token(tokens)
-        if token.type != .RParen do parse_error(token, tokens)
+    else {
+        return parse_expression(parser)
     }
-    
-    return Function_Signature{name, params}, tokens
+
+    panic("Unreachable")
 }
 
+parse_postfix_operators :: proc(parser: ^Parser, inner: ^Ast_Node) -> ^Ast_Node {
+    inner := inner
+
+    for {
+        token := look_ahead(&parser.lexer, 1)
+        if token.type == .PlusPlus {
+            op := make_node_1(Post_Increment_Node, inner)
+            inner = op
+        }
+        else if token.type == .MinusMinus {
+            op := make_node_1(Post_Decrement_Node, inner)
+            inner = op
+        }
+        else do break
+
+        take_token(&parser.lexer)
+    }
+
+    return inner
+}
+
+/*
 parse_function_definition :: proc(tokens: []Token) -> (^Ast_Node, []Token) {
     signature, tokens := parse_function_signature(tokens)
 
@@ -1472,57 +1543,13 @@ parse_function_definition :: proc(tokens: []Token) -> (^Ast_Node, []Token) {
 
     return make_node_3(Function_Definition_Node, signature.name, signature.params, body), tokens
 }
-
-parse_function_declaration :: proc(tokens: []Token) -> (^Ast_Node, []Token) {
-    signature, tokens := parse_function_signature(tokens)
-
-    token: Token = ---
-    token, tokens = take_first_token(tokens)
-    if token.type != .Semicolon do parse_error(token, tokens)
-    return make_node_2(Function_Declaration_Node, signature.name, signature.params), tokens
-}
-
-parse_function_definition_or_declaration :: proc(tokens: []Token) -> (^Ast_Node, []Token) {
-    signature, tokens := parse_function_signature(tokens)
-
-    token: Token = ---
-    token, tokens = take_first_token(tokens)
-    if token.type == .Semicolon {
-        return make_node_2(Function_Declaration_Node, signature.name, signature.params), tokens
-    }
-
-    if token.type != .LBrace do parse_error(token, tokens)
-
-    body: [dynamic]^Ast_Node = ---
-    body, tokens = parse_block_statement_list(tokens)
-
-    return make_node_3(Function_Definition_Node, signature.name, signature.params, body), tokens
-}
-
-parse :: proc(tokens: []Token) -> Program {
-    tokens := tokens
-
-    children := make([dynamic]^Ast_Node)
-
-    for len(tokens) > 0 {
-        function: ^Ast_Node = ---
-        function, tokens = parse_function_definition_or_declaration(tokens)
-        append(&children, function)
-    }
-
-    return Program{children}
-}
+*/
 
 contains :: proc(elem: $E, list: $L/[]E) -> bool {
     for e in list {
         if e == elem do return true
     }
     return false
-}
-
-semantic_error :: proc(location := #caller_location) {
-    fmt.printfln("Semantic error in %v", location)
-    os.exit(4)
 }
 
 validate_and_gather_block_statement_labels :: proc(block_statement: ^Ast_Node, labels: ^[dynamic]Label) {
@@ -2436,8 +2463,8 @@ compile_to_assembly :: proc(source_file: string) -> (asm_file: string) {
         return ""
     }
 
-    tokens := lex(string(code[:]))
-    program := parse(tokens[:])
+    parser := Parser{Lexer{code = string(code[:]), file = source_file}}
+    program := parse_program(&parser)
     when LOG {
         fmt.println("------ AST ------")
         pretty_print_program(program)
@@ -2487,7 +2514,6 @@ compile_with_gcc :: proc(in_file: string, out_file: string) {
         fmt.eprintfln("Failed to compile %v with gcc", in_file)
     }
 }
-*/
 
 usage :: proc() {
     fmt.eprintln("USAGE: occm [-assembly] <source_file>")
@@ -2512,13 +2538,6 @@ main :: proc() {
         return
     }
 
-    /*
     if assembly do compile_to_assembly(filename)
     else        do compile_from_file(filename)
-    */
-    code, ok := os.read_entire_file(filename)
-    lexer := Lexer{code = string(code[:])}
-    for token := get_token(&lexer); token.type != .EndOfFile; token = get_token(&lexer) {
-        fmt.println(token)
-    }
 }

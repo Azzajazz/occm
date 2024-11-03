@@ -1,1 +1,2 @@
 exit_code: 0
+stdout: b'Aa\r\nBb\r\nCc\r\nDd\r\nEe\r\nFf\r\nGg\r\nHh\r\nIi\r\nJj\r\nKk\r\nLl\r\nMm\r\nNn\r\nOo\r\nPp\r\nQq\r\nRr\r\nSs\r\nTt\r\nUu\r\nVv\r\nWw\r\nXx\r\nYy\r\nZz\r\n'
