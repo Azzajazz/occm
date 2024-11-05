@@ -18,7 +18,7 @@ class Stats:
         self.passed_count += 1
 
 def is_test_case_of_type(path: Path, ty: str) -> bool:
-    return path.match(f"**\\{ty}*\\**")
+    return f"\\{ty}" in str(path) 
 
 def compare_to_exp_file(process_result: subprocess.CompletedProcess, exp_file: exp_files.ExpFile, stats: Stats) -> bool:
     if exp_file.exit_code != process_result.returncode:
@@ -90,6 +90,8 @@ def main():
     parser.add_argument("-norebuild")
     args = parser.parse_args()
 
+    stats = Stats()
+
     if not args.norebuild:
         os.chdir("..")
         build_result = subprocess.run(
@@ -103,16 +105,16 @@ def main():
         os.chdir("test")
 
     if args.path:
-        do_tests(args.path)
+        do_tests(Path(args.path), stats)
     else:
         low = 1
         if args.low: low = int(args.low)
         high = 20
         if args.high: high = int(args.high)
         for i in range(low, high + 1):
-            do_tests(Path(f"chapter_{i}"), Stats())
+            do_tests(Path(f"chapter_{i}"), stats)
 
-    print(f"Passed: {passed}, Failed: {failed}")
+    print(f"Passed: {stats.passed_count}, Failed: {stats.failed_count}")
 
 if __name__ == "__main__":
     main()
