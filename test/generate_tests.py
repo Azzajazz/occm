@@ -6,7 +6,7 @@ import subprocess
 import exp_files
 
 def is_test_case_of_type(path: Path, ty: str) -> bool:
-    return path.match(f"**\\{ty}*\\**")
+    return f"\\{ty}" in str(path)
 
 def write_exp_file(exp_file_path: Path, process_result: subprocess.CompletedProcess):
     print(f"Generating {exp_file_path}")
@@ -51,7 +51,7 @@ def main():
     args = parser.parse_args()
 
     if args.path:
-        generate_exp_files_with_gcc(args.path)
+        generate_exp_files_with_gcc(Path(args.path))
     else:
         low = 1
         if args.low: low = int(args.low)
