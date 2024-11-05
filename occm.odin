@@ -752,7 +752,7 @@ parse_block_item :: proc(parser: ^Parser) -> ^Ast_Node {
                 return statement
             }
             else if token_2.type == .LParen {
-                return parse_function_declaration(parser)
+                return parse_function_definition_or_declaration(parser)
             }
             else {
                 parse_error(parser, "Expected a function or variable declaration.", span_token(token))
@@ -1309,7 +1309,7 @@ parse_function_definition :: proc(tokens: []Token) -> (^Ast_Node, []Token) {
     if token.type != .LBrace do parse_error(token, tokens)
 
     body: [dynamic]^Ast_Node = ---
-    body, tokens = parse_block_statement_list(tokens)
+    body, tokens = parse_block_item_list(tokens)
 
     return make_node_3(Function_Definition_Node, signature.name, signature.params, body), tokens
 }
@@ -1322,35 +1322,35 @@ contains :: proc(elem: $E, list: $L/[]E) -> bool {
     return false
 }
 
-validate_and_gather_block_statement_labels :: proc(block_statement: ^Ast_Node, labels: ^[dynamic]Label) {
-    for label in block_statement.labels {
+validate_and_gather_block_item_labels :: proc(block_item: ^Ast_Node, labels: ^[dynamic]Label) {
+    for label in block_item.labels {
         if _, is_normal := label.(string); is_normal && contains(label, labels[:]) do semantic_error()
         append(labels, label)
     }
 
-    #partial switch stmt in block_statement.variant {
+    #partial switch stmt in block_item.variant {
         case If_Node:
-            validate_and_gather_block_statement_labels(stmt.if_true, labels)
+            validate_and_gather_block_item_labels(stmt.if_true, labels)
 
         case If_Else_Node:
-            validate_and_gather_block_statement_labels(stmt.if_true, labels)
-            validate_and_gather_block_statement_labels(stmt.if_false, labels)
+            validate_and_gather_block_item_labels(stmt.if_true, labels)
+            validate_and_gather_block_item_labels(stmt.if_false, labels)
 
         case While_Node:
-            validate_and_gather_block_statement_labels(stmt.if_true, labels)            
+            validate_and_gather_block_item_labels(stmt.if_true, labels)            
 
         case Do_While_Node:
-            validate_and_gather_block_statement_labels(stmt.if_true, labels)            
+            validate_and_gather_block_item_labels(stmt.if_true, labels)            
 
         case For_Node:
-            validate_and_gather_block_statement_labels(stmt.if_true, labels)            
+            validate_and_gather_block_item_labels(stmt.if_true, labels)            
 
         case Switch_Node:
-            validate_and_gather_block_statement_labels(stmt.block, labels)
+            validate_and_gather_block_item_labels(stmt.block, labels)
 
         case Compound_Statement_Node:
             for statement in stmt.statements {
-                validate_and_gather_block_statement_labels(statement, labels)
+                validate_and_gather_block_item_labels(statement, labels)
             }
     }
 }
@@ -1358,8 +1358,8 @@ validate_and_gather_block_statement_labels :: proc(block_statement: ^Ast_Node, l
 validate_and_gather_function_labels :: proc(function: Function_Definition_Node) -> [dynamic]Label {
     labels := make([dynamic]Label)
 
-    for block_statement in function.body {
-        validate_and_gather_block_statement_labels(block_statement, &labels)
+    for block_item in function.body {
+        validate_and_gather_block_item_labels(block_item, &labels)
     }
 
     return labels
@@ -1876,8 +1876,8 @@ emit_expr :: proc(builder: ^strings.Builder, expr: ^Ast_Node, vars: ^Scoped_Vari
     }
 }
 
-emit_block_statement :: proc(builder: ^strings.Builder, block_statement: ^Ast_Node, offsets: ^Scoped_Variable_Offsets, info: ^Emit_Info, function_name: string) {
-    #partial switch stmt in block_statement.variant {
+emit_block_item :: proc(builder: ^strings.Builder, block_item: ^Ast_Node, offsets: ^Scoped_Variable_Offsets, info: ^Emit_Info, function_name: string) {
+    #partial switch stmt in block_item.variant {
         case Decl_Assign_Node:
             if stmt.var_name in offsets.var_offsets do semantic_error()
             offsets.var_offsets[stmt.var_name] = info.variable_offset
@@ -1893,7 +1893,7 @@ emit_block_statement :: proc(builder: ^strings.Builder, block_statement: ^Ast_No
         case Function_Declaration_Node: // Do nothing
 
         case:
-            emit_statement(builder, block_statement, offsets, info, function_name)
+            emit_statement(builder, block_item, offsets, info, function_name)
     }
 
 }
@@ -1977,7 +1977,7 @@ emit_statement :: proc(builder: ^strings.Builder, statement: ^Ast_Node, parent_o
             current_label += 3
             append(&info.loop_labels, Loop_Labels{continue_label = label + 1, break_label = label + 2})
             append(&info.containing_control_flows, Containing_Control_Flow.Loop)
-            emit_block_statement(builder, stmt.pre_condition, offsets, info, function_name)
+            emit_block_item(builder, stmt.pre_condition, offsets, info, function_name)
             emit_label(builder, label)
             emit_expr(builder, stmt.condition, offsets, info)
             fmt.sbprintln(builder, "  cmp $0, %eax")
@@ -2039,8 +2039,8 @@ emit_statement :: proc(builder: ^strings.Builder, statement: ^Ast_Node, parent_o
 
         case Compound_Statement_Node:
             offsets := make_scoped_variable_offsets(parent_offsets)
-            for block_statement in stmt.statements {
-                emit_block_statement(builder, block_statement, offsets, info, function_name)
+            for block_item in stmt.statements {
+                emit_block_item(builder, block_item, offsets, info, function_name)
             }
 
         case:
@@ -2063,45 +2063,45 @@ make_scoped_variable_offsets :: proc(parent: ^Scoped_Variable_Offsets) -> ^Scope
 count_function_variable_declarations :: proc(function: Function_Definition_Node) -> int {
     declarations := 0
 
-    for block_statement in function.body {
-        declarations += count_block_statement_variable_declarations(block_statement)
+    for block_item in function.body {
+        declarations += count_block_item_variable_declarations(block_item)
     }
 
     return declarations
 }
 
-count_block_statement_variable_declarations :: proc(block_statement: ^Ast_Node) -> int {
+count_block_item_variable_declarations :: proc(block_item: ^Ast_Node) -> int {
     declarations := 0
 
-    #partial switch stmt in block_statement.variant {
+    #partial switch stmt in block_item.variant {
         case Decl_Node, Decl_Assign_Node:
             declarations += 1
 
         case If_Node:
-            declarations += count_block_statement_variable_declarations(stmt.if_true)
+            declarations += count_block_item_variable_declarations(stmt.if_true)
 
         case If_Else_Node:
-            declarations += count_block_statement_variable_declarations(stmt.if_true)
-            declarations += count_block_statement_variable_declarations(stmt.if_false)
+            declarations += count_block_item_variable_declarations(stmt.if_true)
+            declarations += count_block_item_variable_declarations(stmt.if_false)
 
         case While_Node:
-            declarations += count_block_statement_variable_declarations(stmt.if_true)            
+            declarations += count_block_item_variable_declarations(stmt.if_true)            
 
         case Do_While_Node:
-            declarations += count_block_statement_variable_declarations(stmt.if_true)            
+            declarations += count_block_item_variable_declarations(stmt.if_true)            
 
         case For_Node:
             #partial switch pre in stmt.pre_condition.variant {
                 case Decl_Node, Decl_Assign_Node:
                     declarations += 1
             }
-            declarations += count_block_statement_variable_declarations(stmt.if_true)            
+            declarations += count_block_item_variable_declarations(stmt.if_true)            
         case Switch_Node:
-            declarations += count_block_statement_variable_declarations(stmt.block)
+            declarations += count_block_item_variable_declarations(stmt.block)
 
         case Compound_Statement_Node:
             for statement in stmt.statements {
-                declarations += count_block_statement_variable_declarations(statement)
+                declarations += count_block_item_variable_declarations(statement)
             }
     }
 
@@ -2196,7 +2196,7 @@ emit_function :: proc(builder: ^strings.Builder, function: Function_Definition_N
     }
 
     for statement in function.body {
-        emit_block_statement(builder, statement, offsets, &info, function.name)
+        emit_block_item(builder, statement, offsets, &info, function.name)
     }
 
     if function.name == "main" {
