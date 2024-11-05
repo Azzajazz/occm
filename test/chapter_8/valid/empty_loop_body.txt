@@ -1,2 +1,3 @@
 exit_code: 252
 stdout: b''
+stderr: b''

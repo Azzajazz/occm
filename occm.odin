@@ -237,9 +237,9 @@ span_token :: proc(token: Token) -> Span {
 }
 
 lex_error :: proc(lexer: ^Lexer) {
-    fmt.printfln("%v(%v:%v) Syntax error: Unexpected character %c", lexer.file, lexer.line + 1, lexer.char + 1, lexer.code[lexer.code_index])
+    fmt.eprintfln("%v(%v:%v) Lex error! Unexpected character %c", lexer.file, lexer.line + 1, lexer.char + 1, lexer.code[lexer.code_index])
     mark_span(lexer.code, Span{lexer.line, lexer.char, lexer.char + 1})
-    os.exit(2)
+    os.exit(1)
 }
 
 consume_int_constant_token :: proc(lexer: ^Lexer) {
@@ -626,11 +626,11 @@ Parser :: struct {
 }
 
 parse_error :: proc(parser: ^Parser, message: string, span: Span = {}) {
-    fmt.printfln("%v(%v:%v) Parse error! %v", parser.lexer.file, parser.lexer.line + 1, parser.lexer.char + 1, message)
+    fmt.eprintfln("%v(%v:%v) Parse error! %v", parser.lexer.file, parser.lexer.line + 1, parser.lexer.char + 1, message)
     if span != {} {
         mark_span(parser.lexer.code, span)
     }
-    os.exit(3)
+    os.exit(1)
 }
 
 parse_program :: proc(parser: ^Parser) -> Program {
@@ -1007,8 +1007,8 @@ parse_expression :: proc(parser: ^Parser, min_prec := 0) -> ^Ast_Node {
 }
 
 semantic_error :: proc(location := #caller_location) {
-    fmt.printfln("Semantic error in %v", location)
-    os.exit(4)
+    fmt.eprintfln("Semantic error in %v", location)
+    os.exit(1)
 }
 
 parse_function_declaration :: proc(parser: ^Parser) -> ^Ast_Node {

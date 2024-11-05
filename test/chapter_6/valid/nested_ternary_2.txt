@@ -1,2 +1,3 @@
 exit_code: 15
 stdout: b''
+stderr: b''

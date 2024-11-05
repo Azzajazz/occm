@@ -1,2 +1,3 @@
 exit_code: 4294967292
 stdout: b''
+stderr: b''
