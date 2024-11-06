@@ -4,6 +4,7 @@ import argparse
 import subprocess
 
 import exp_files
+from common import *
 
 def is_test_case_of_type(path: Path, ty: str) -> bool:
     return f"\\{ty}" in str(path)
@@ -48,7 +49,11 @@ def main():
     parser.add_argument("-path")
     parser.add_argument("-high")
     parser.add_argument("-low")
+    parser.add_argument("-norebuild")
     args = parser.parse_args()
+
+    if not args.norebuild:
+        rebuild_compiler()
 
     if args.path:
         generate_exp_files_with_gcc(Path(args.path))

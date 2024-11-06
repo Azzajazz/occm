@@ -4,6 +4,7 @@ import subprocess
 import argparse
 
 import exp_files
+from common import *
 
 class Stats:
     passed_count = 0
@@ -16,9 +17,6 @@ class Stats:
     def passed(self):
         print(f"PASS!")
         self.passed_count += 1
-
-def is_test_case_of_type(path: Path, ty: str) -> bool:
-    return f"\\{ty}" in str(path) 
 
 def compare_to_exp_file(process_result: subprocess.CompletedProcess, exp_file: exp_files.ExpFile, stats: Stats) -> bool:
     if exp_file.exit_code != process_result.returncode:
@@ -93,16 +91,7 @@ def main():
     stats = Stats()
 
     if not args.norebuild:
-        os.chdir("..")
-        build_result = subprocess.run(
-                ["odin", "build", "."],
-                stdout=subprocess.DEVNULL,
-                stderr=subprocess.DEVNULL
-            )               
-        if build_result.returncode != 0:
-            print("ABORT: Compiler build failed")
-            return
-        os.chdir("test")
+        rebuild_compiler()
 
     if args.path:
         do_tests(Path(args.path), stats)
