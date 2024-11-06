@@ -1006,8 +1006,8 @@ parse_expression :: proc(parser: ^Parser, min_prec := 0) -> ^Ast_Node {
     return leaf
 }
 
-semantic_error :: proc(location := #caller_location) {
-    fmt.eprintfln("Semantic error in %v", location)
+semantic_error :: proc() {
+    fmt.eprintln("Semantic error!")
     os.exit(1)
 }
 
@@ -1322,6 +1322,16 @@ contains :: proc(elem: $E, list: $L/[]E) -> bool {
     return false
 }
 
+// NOTE: This could be more efficient, but it is currently used on small lists.
+contains_duplicate :: proc(list: $L/[]$E) -> bool {
+    for i in 0..<len(list) {
+        for j in i..<len(list) {
+            if list[i] == list[j] do return true
+        }
+    }
+    return false
+}
+
 validate_and_gather_block_item_labels :: proc(block_item: ^Ast_Node, labels: ^[dynamic]Label) {
     for label in block_item.labels {
         if _, is_normal := label.(string); is_normal && contains(label, labels[:]) do semantic_error()
@@ -1366,7 +1376,7 @@ validate_and_gather_function_labels :: proc(function: Function_Definition_Node) 
 }
 
 get_offset :: proc(offsets: ^Scoped_Variable_Offsets, var_name: string) -> int {
-    offset, ok := offsets.var_offsets[var_name]
+    offset, ok := offsets.offsets[var_name]
     if ok {
         return offset
     }
@@ -1375,21 +1385,332 @@ get_offset :: proc(offsets: ^Scoped_Variable_Offsets, var_name: string) -> int {
     }
 }
 
-is_defined :: proc(offsets: ^Scoped_Variable_Offsets, var_name: string) -> bool {
-    if offsets.parent == nil do return var_name in offsets.var_offsets
+is_lvalue :: proc(info: ^Scoped_Validation_Info, lvalue: ^Ast_Node) -> bool {
+    ident, is_ident := lvalue.variant.(Ident_Node)
+    return is_ident && is_defined_variable(info, ident.var_name)
+}
 
-    if var_name in offsets.var_offsets {
-        return true
-    }
-    else {
-        return is_defined(offsets.parent, var_name)
+validate_function_declarations_and_definitions :: proc(program: Program) {
+    for function in program.children {
+        #partial switch func in function.variant {
+            case Function_Declaration_Node:
+                if contains_duplicate(func.params[:]) do semantic_error()
+
+            case Function_Definition_Node:
+                if contains_duplicate(func.params[:]) do semantic_error()
+
+            case:
+                panic("Unreachable")
+        }
     }
 }
 
-validate_lvalue :: proc(offsets: ^Scoped_Variable_Offsets, lvalue: ^Ast_Node) {
-    ident, is_ident := lvalue.variant.(Ident_Node)
-    if !is_ident do semantic_error()
-    if !is_defined(offsets, ident.var_name) do semantic_error()
+String_Set :: map[string]struct{}
+
+Validation_Info :: struct {
+    control_flows: [dynamic]Containing_Control_Flow,
+}
+
+Scoped_Validation_Info :: struct {
+    parent: ^Scoped_Validation_Info,
+    function_names: String_Set,
+    variable_names: String_Set,
+}
+
+is_defined_variable :: proc(scoped_info: ^Scoped_Validation_Info, var_name: string) -> bool {
+    if scoped_info.parent == nil do return var_name in scoped_info.variable_names
+
+    if var_name in scoped_info.variable_names {
+        return true
+    }
+    else {
+        return is_defined_variable(scoped_info.parent, var_name)
+    }
+}
+
+make_scoped_validation_info :: proc(parent: ^Scoped_Validation_Info) -> ^Scoped_Validation_Info {
+    scoped_info := new(Scoped_Validation_Info)
+    scoped_info.parent = parent
+    scoped_info.function_names = make(String_Set)
+    scoped_info.variable_names = make(String_Set)
+    return scoped_info
+}
+
+delete_scoped_validation_info :: proc(scoped_info: ^Scoped_Validation_Info) {
+    delete(scoped_info.function_names)
+    delete(scoped_info.variable_names)
+    free(scoped_info)
+}
+
+validate_program :: proc(program: Program) {
+    scoped_info := make_scoped_validation_info(nil)
+    defer delete_scoped_validation_info(scoped_info)
+    
+    info := Validation_Info{make([dynamic]Containing_Control_Flow)}
+    defer delete(info.control_flows)
+
+    for function in program.children {
+        #partial switch func in function.variant {
+            case Function_Declaration_Node:
+                if contains_duplicate(func.params[:]) do semantic_error()
+                scoped_info.function_names[func.name] = {}
+
+            case Function_Definition_Node:
+                if contains_duplicate(func.params[:]) do semantic_error()
+                labels := validate_and_gather_function_labels(func)
+                scoped_info.function_names[func.name] = {}
+
+                new_scoped_info := make_scoped_validation_info(scoped_info)
+                defer delete_scoped_validation_info(new_scoped_info)
+                for param in func.params {
+                    new_scoped_info.variable_names[param] = {}
+                }
+
+                for block_item in func.body {
+                    validate_block_item(block_item, &info, new_scoped_info, labels[:])
+                }
+
+            case:
+                panic("Unreachable")
+        }
+    }
+}
+
+validate_block_item :: proc(block_item: ^Ast_Node, info: ^Validation_Info, scoped_info: ^Scoped_Validation_Info, labels: []Label) {
+    #partial switch item in block_item.variant {
+        case Decl_Assign_Node:
+            if item.var_name in scoped_info.variable_names do semantic_error()
+            if item.var_name in scoped_info.function_names do semantic_error()
+            scoped_info.variable_names[item.var_name] = {}
+            validate_expr(item.right, info, scoped_info)
+
+        case Decl_Node: // Space on the stack is already allocated by emit_function
+            if item.var_name in scoped_info.variable_names do semantic_error()
+            if item.var_name in scoped_info.function_names do semantic_error()
+            scoped_info.variable_names[item.var_name] = {}
+
+        case Function_Declaration_Node:
+            if item.name in scoped_info.variable_names do semantic_error()
+            scoped_info.function_names[item.name] = {}
+
+        case Function_Definition_Node:
+            semantic_error() // Function definitions cannot be nested in scopes
+
+        case:
+            validate_statement(block_item, info, scoped_info, labels)
+    }
+}
+
+validate_statement :: proc(statement: ^Ast_Node, info: ^Validation_Info, scoped_info: ^Scoped_Validation_Info, labels: []Label) {
+    #partial switch stmt in statement.variant {
+        case Null_Statement_Node: // Do nothing
+
+        case Return_Node:
+            validate_expr(stmt.expr, info, scoped_info)
+
+        case If_Node:
+            validate_expr(stmt.condition, info, scoped_info)
+            validate_statement(stmt.if_true, info, scoped_info, labels)
+
+        case If_Else_Node:
+            validate_expr(stmt.condition, info, scoped_info)
+            validate_statement(stmt.if_true, info, scoped_info, labels)
+            validate_statement(stmt.if_false, info, scoped_info, labels)
+
+        case While_Node:
+            append(&info.control_flows, Containing_Control_Flow.Loop)
+            validate_expr(stmt.condition, info, scoped_info)
+            validate_statement(stmt.if_true, info, scoped_info, labels)
+            pop(&info.control_flows)
+
+        case Do_While_Node:
+            append(&info.control_flows, Containing_Control_Flow.Loop)
+            validate_expr(stmt.condition, info, scoped_info)
+            validate_statement(stmt.if_true, info, scoped_info, labels)
+            pop(&info.control_flows)
+
+        case For_Node:
+            append(&info.control_flows, Containing_Control_Flow.Loop)
+            new_scoped_info := make_scoped_validation_info(scoped_info)
+            defer delete_scoped_validation_info(new_scoped_info)
+            validate_block_item(stmt.pre_condition, info, new_scoped_info, labels) // @TODO: This is much too strong of a function here
+            validate_expr(stmt.condition, info, new_scoped_info)
+            if stmt.post_condition != nil {
+                validate_expr(stmt.post_condition, info, new_scoped_info)
+            }
+            validate_statement(stmt.if_true, info, new_scoped_info, labels)
+            pop(&info.control_flows)
+
+        case Continue_Node:
+            if len(info.control_flows) == 0 do semantic_error()
+
+        case Break_Node:
+            if len(info.control_flows) == 0 do semantic_error()
+
+        case Goto_Node:
+            if !contains(cast(Label)stmt.label, labels) do semantic_error()
+
+        case Switch_Node:
+            append(&info.control_flows, Containing_Control_Flow.Switch)
+            validate_expr(stmt.expr, info, scoped_info)
+            validate_statement(stmt.block, info, scoped_info, labels)
+            pop(&info.control_flows)
+
+        case Compound_Statement_Node:
+            new_scoped_info := make_scoped_validation_info(scoped_info)
+            defer delete_scoped_validation_info(new_scoped_info)
+
+            for block_item in stmt.statements {
+                validate_block_item(block_item, info, new_scoped_info, labels)
+            }
+
+        case:
+            validate_expr(statement, info, scoped_info)
+    }
+}
+
+validate_expr :: proc(expr: ^Ast_Node, info: ^Validation_Info, scoped_info: ^Scoped_Validation_Info) {
+    #partial switch e in expr.variant {
+        case Int_Constant_Node: // Do nothing
+
+        case Ident_Node:
+            if !is_defined_variable(scoped_info, e.var_name) do semantic_error()
+
+        case Negate_Node:
+            validate_expr(e.expr, info, scoped_info)
+        case Bit_Negate_Node:
+            validate_expr(e.expr, info, scoped_info)
+        case Boolean_Negate_Node:
+            validate_expr(e.expr, info, scoped_info)
+        case Pre_Decrement_Node:
+            if !is_lvalue(scoped_info, e.expr) do semantic_error()
+            validate_expr(e.expr, info, scoped_info)
+        case Pre_Increment_Node:
+            if !is_lvalue(scoped_info, e.expr) do semantic_error()
+            validate_expr(e.expr, info, scoped_info)
+        case Post_Decrement_Node:
+            if !is_lvalue(scoped_info, e.expr) do semantic_error()
+            validate_expr(e.expr, info, scoped_info)
+        case Post_Increment_Node:
+            if !is_lvalue(scoped_info, e.expr) do semantic_error()
+            validate_expr(e.expr, info, scoped_info)
+            
+
+        case Add_Node:
+            validate_expr(e.left, info, scoped_info)
+            validate_expr(e.right, info, scoped_info)
+        case Subtract_Node:
+            validate_expr(e.left, info, scoped_info)
+            validate_expr(e.right, info, scoped_info)
+        case Multiply_Node:
+            validate_expr(e.left, info, scoped_info)
+            validate_expr(e.right, info, scoped_info)
+        case Modulo_Node:
+            validate_expr(e.left, info, scoped_info)
+            validate_expr(e.right, info, scoped_info)
+        case Divide_Node:
+            validate_expr(e.left, info, scoped_info)
+            validate_expr(e.right, info, scoped_info)
+        case Boolean_And_Node:
+            validate_expr(e.left, info, scoped_info)
+            validate_expr(e.right, info, scoped_info)
+        case Boolean_Or_Node:
+            validate_expr(e.left, info, scoped_info)
+            validate_expr(e.right, info, scoped_info)
+        case Boolean_Equal_Node:
+            validate_expr(e.left, info, scoped_info)
+            validate_expr(e.right, info, scoped_info)
+        case Boolean_Not_Equal_Node:
+            validate_expr(e.left, info, scoped_info)
+            validate_expr(e.right, info, scoped_info)
+        case Less_Node:
+            validate_expr(e.left, info, scoped_info)
+            validate_expr(e.right, info, scoped_info)
+        case Less_Equal_Node:
+            validate_expr(e.left, info, scoped_info)
+            validate_expr(e.right, info, scoped_info)
+        case More_Node:
+            validate_expr(e.left, info, scoped_info)
+            validate_expr(e.right, info, scoped_info)
+        case More_Equal_Node:
+            validate_expr(e.left, info, scoped_info)
+            validate_expr(e.right, info, scoped_info)
+        case Bit_And_Node:
+            validate_expr(e.left, info, scoped_info)
+            validate_expr(e.right, info, scoped_info)
+        case Bit_Or_Node:
+            validate_expr(e.left, info, scoped_info)
+            validate_expr(e.right, info, scoped_info)
+        case Bit_Xor_Node:
+            validate_expr(e.left, info, scoped_info)
+            validate_expr(e.right, info, scoped_info)
+        case Shift_Left_Node:
+            validate_expr(e.left, info, scoped_info)
+            validate_expr(e.right, info, scoped_info)
+        case Shift_Right_Node:
+            validate_expr(e.left, info, scoped_info)
+            validate_expr(e.right, info, scoped_info)
+
+        case Equal_Node:
+            if !is_lvalue(scoped_info, e.left) do semantic_error()
+            validate_expr(e.left, info, scoped_info)
+            validate_expr(e.right, info, scoped_info)
+        case Plus_Equal_Node:
+            if !is_lvalue(scoped_info, e.left) do semantic_error()
+            validate_expr(e.left, info, scoped_info)
+            validate_expr(e.right, info, scoped_info)
+        case Minus_Equal_Node:
+            if !is_lvalue(scoped_info, e.left) do semantic_error()
+            validate_expr(e.left, info, scoped_info)
+            validate_expr(e.right, info, scoped_info)
+        case Times_Equal_Node:
+            if !is_lvalue(scoped_info, e.left) do semantic_error()
+            validate_expr(e.left, info, scoped_info)
+            validate_expr(e.right, info, scoped_info)
+        case Divide_Equal_Node:
+            if !is_lvalue(scoped_info, e.left) do semantic_error()
+            validate_expr(e.left, info, scoped_info)
+            validate_expr(e.right, info, scoped_info)
+        case Modulo_Equal_Node:
+            if !is_lvalue(scoped_info, e.left) do semantic_error()
+            validate_expr(e.left, info, scoped_info)
+            validate_expr(e.right, info, scoped_info)
+        case Xor_Equal_Node:
+            if !is_lvalue(scoped_info, e.left) do semantic_error()
+            validate_expr(e.left, info, scoped_info)
+            validate_expr(e.right, info, scoped_info)
+        case Or_Equal_Node:
+            if !is_lvalue(scoped_info, e.left) do semantic_error()
+            validate_expr(e.left, info, scoped_info)
+            validate_expr(e.right, info, scoped_info)
+        case And_Equal_Node:
+            if !is_lvalue(scoped_info, e.left) do semantic_error()
+            validate_expr(e.left, info, scoped_info)
+            validate_expr(e.right, info, scoped_info)
+        case Shift_Left_Equal_Node:
+            if !is_lvalue(scoped_info, e.left) do semantic_error()
+            validate_expr(e.left, info, scoped_info)
+            validate_expr(e.right, info, scoped_info)
+        case Shift_Right_Equal_Node:
+            if !is_lvalue(scoped_info, e.left) do semantic_error()
+            validate_expr(e.left, info, scoped_info)
+            validate_expr(e.right, info, scoped_info)
+
+        case Ternary_Node:
+            validate_expr(e.condition, info, scoped_info)
+            validate_expr(e.if_true, info, scoped_info)
+            validate_expr(e.if_false, info, scoped_info)
+
+        case Function_Call_Node:
+            if e.name not_in scoped_info.function_names do semantic_error()
+            for arg in e.args {
+                validate_expr(arg, info, scoped_info)
+            }
+
+        case:
+            fmt.println(expr)
+            panic("Not a valid expression!")
+    }
 }
 
 Loop_Labels :: struct {
@@ -1422,7 +1743,24 @@ Emit_Info :: struct {
     containing_control_flows: [dynamic]Containing_Control_Flow,
 }
 
-current_label := 1
+Scoped_Variable_Offsets :: struct {
+    parent: ^Scoped_Variable_Offsets,
+    offsets: map[string]int,
+}
+
+make_scoped_variable_offsets :: proc(parent: ^Scoped_Variable_Offsets) -> ^Scoped_Variable_Offsets {
+    offsets := new(Scoped_Variable_Offsets)
+    offsets.parent = parent
+    offsets.offsets = make(map[string]int)
+    return offsets
+}
+
+delete_scoped_variable_offsets :: proc(offsets: ^Scoped_Variable_Offsets) {
+    delete(offsets.offsets)
+    free(offsets)
+}
+
+current_label := 1 //@TODO: Put this in Emit_Info
 
 emit_label :: proc(builder: ^strings.Builder, label := -1) {
     if label == -1 {
@@ -1451,22 +1789,18 @@ emit_unary_op :: proc(builder: ^strings.Builder, op: ^Ast_Node, offsets: ^Scoped
             fmt.sbprintln(builder, "  sete %al")
 
         case Pre_Decrement_Node:
-            validate_lvalue(offsets, o.expr)
             fmt.sbprintfln(builder, "  decl %v(%%rbp)", get_offset(offsets, o.expr.variant.(Ident_Node).var_name))
             fmt.sbprintfln(builder, "  mov %v(%%rbp), %%eax", get_offset(offsets, o.expr.variant.(Ident_Node).var_name))
 
         case Pre_Increment_Node:
-            validate_lvalue(offsets, o.expr)
             fmt.sbprintfln(builder, "  incl %v(%%rbp)", get_offset(offsets, o.expr.variant.(Ident_Node).var_name))
             fmt.sbprintfln(builder, "  mov %v(%%rbp), %%eax", get_offset(offsets, o.expr.variant.(Ident_Node).var_name))
 
         case Post_Decrement_Node:
-            validate_lvalue(offsets, o.expr)
             fmt.sbprintfln(builder, "  mov %v(%%rbp), %%eax", get_offset(offsets, o.expr.variant.(Ident_Node).var_name))
             fmt.sbprintfln(builder, "  decl %v(%%rbp)", get_offset(offsets, o.expr.variant.(Ident_Node).var_name))
 
         case Post_Increment_Node:
-            validate_lvalue(offsets, o.expr)
             fmt.sbprintfln(builder, "  mov %v(%%rbp), %%eax", get_offset(offsets, o.expr.variant.(Ident_Node).var_name))
             fmt.sbprintfln(builder, "  incl %v(%%rbp)", get_offset(offsets, o.expr.variant.(Ident_Node).var_name))
 
@@ -1673,19 +2007,16 @@ emit_binary_op :: proc(builder: ^strings.Builder, op: ^Ast_Node, vars: ^Scoped_V
 emit_assign_op :: proc(builder: ^strings.Builder, op: ^Ast_Node, offsets: ^Scoped_Variable_Offsets, info: ^Emit_Info) {
     #partial switch o in op.variant {
         case Equal_Node:
-            validate_lvalue(offsets, o.left)
             emit_expr(builder, o.right, offsets, info)
             fmt.sbprintfln(builder, "  mov %%eax, %v(%%rbp)", get_offset(offsets, o.left.variant.(Ident_Node).var_name))
 
         case Plus_Equal_Node:
-            validate_lvalue(offsets, o.left)
             emit_expr(builder, o.right, offsets, info)
             fmt.sbprintfln(builder, "  mov %v(%%rbp), %%ebx", get_offset(offsets, o.left.variant.(Ident_Node).var_name))
             fmt.sbprintln(builder, "  add %ebx, %eax")
             fmt.sbprintfln(builder, "  mov %%eax, %v(%%rbp)", get_offset(offsets, o.left.variant.(Ident_Node).var_name))
             
         case Minus_Equal_Node:
-            validate_lvalue(offsets, o.left)
             emit_expr(builder, o.right, offsets, info)
             fmt.sbprintln(builder, "  mov %eax, %ebx")
             fmt.sbprintfln(builder, "  mov %v(%%rbp), %%eax", get_offset(offsets, o.left.variant.(Ident_Node).var_name))
@@ -1693,7 +2024,6 @@ emit_assign_op :: proc(builder: ^strings.Builder, op: ^Ast_Node, offsets: ^Scope
             fmt.sbprintfln(builder, "  mov %%eax, %v(%%rbp)", get_offset(offsets, o.left.variant.(Ident_Node).var_name))
 
         case Times_Equal_Node:
-            validate_lvalue(offsets, o.left)
             emit_expr(builder, o.right, offsets, info)
             fmt.sbprintfln(builder, "  mov %v(%%rbp), %%ebx", get_offset(offsets, o.left.variant.(Ident_Node).var_name))
             fmt.sbprintln(builder, "  push %rdx") // rdx could be a function parameter, so we need to save it
@@ -1702,7 +2032,6 @@ emit_assign_op :: proc(builder: ^strings.Builder, op: ^Ast_Node, offsets: ^Scope
             fmt.sbprintfln(builder, "  mov %%eax, %v(%%rbp)", get_offset(offsets, o.left.variant.(Ident_Node).var_name))
 
         case Divide_Equal_Node:
-            validate_lvalue(offsets, o.left)
             emit_expr(builder, o.right, offsets, info)
             fmt.sbprintln(builder, "  mov %eax, %ebx")
             fmt.sbprintfln(builder, "  mov %v(%%rbp), %%eax", get_offset(offsets, o.left.variant.(Ident_Node).var_name))
@@ -1715,7 +2044,6 @@ emit_assign_op :: proc(builder: ^strings.Builder, op: ^Ast_Node, offsets: ^Scope
             fmt.sbprintfln(builder, "  mov %%eax, %v(%%rbp)", get_offset(offsets, o.left.variant.(Ident_Node).var_name))
 
         case Modulo_Equal_Node:
-            validate_lvalue(offsets, o.left)
             emit_expr(builder, o.right, offsets, info)
             fmt.sbprintln(builder, "  mov %eax, %ebx")
             fmt.sbprintfln(builder, "  mov %v(%%rbp), %%eax", get_offset(offsets, o.left.variant.(Ident_Node).var_name))
@@ -1729,28 +2057,24 @@ emit_assign_op :: proc(builder: ^strings.Builder, op: ^Ast_Node, offsets: ^Scope
             fmt.sbprintln(builder, "  mov %edx, %eax")
 
         case Xor_Equal_Node:
-            validate_lvalue(offsets, o.left)
             emit_expr(builder, o.right, offsets, info)
             fmt.sbprintfln(builder, "  mov %v(%%rbp), %%ebx", get_offset(offsets, o.left.variant.(Ident_Node).var_name))
             fmt.sbprintln(builder, "  xor %ebx, %eax")
             fmt.sbprintfln(builder, "  mov %%eax, %v(%%rbp)", get_offset(offsets, o.left.variant.(Ident_Node).var_name))
 
         case Or_Equal_Node:
-            validate_lvalue(offsets, o.left)
             emit_expr(builder, o.right, offsets, info)
             fmt.sbprintfln(builder, "  mov %v(%%rbp), %%ebx", get_offset(offsets, o.left.variant.(Ident_Node).var_name))
             fmt.sbprintln(builder, "  or %ebx, %eax")
             fmt.sbprintfln(builder, "  mov %%eax, %v(%%rbp)", get_offset(offsets, o.left.variant.(Ident_Node).var_name))
 
         case And_Equal_Node:
-            validate_lvalue(offsets, o.left)
             emit_expr(builder, o.right, offsets, info)
             fmt.sbprintfln(builder, "  mov %v(%%rbp), %%ebx", get_offset(offsets, o.left.variant.(Ident_Node).var_name))
             fmt.sbprintln(builder, "  and %ebx, %eax")
             fmt.sbprintfln(builder, "  mov %%eax, %v(%%rbp)", get_offset(offsets, o.left.variant.(Ident_Node).var_name))
 
         case Shift_Left_Equal_Node:
-            validate_lvalue(offsets, o.left)
             emit_expr(builder, o.right, offsets, info)
             fmt.sbprintln(builder, "  push %rcx") // rcx could be a function parameter, so we need to save it
             fmt.sbprintln(builder, "  mov %eax, %ecx")
@@ -1760,7 +2084,6 @@ emit_assign_op :: proc(builder: ^strings.Builder, op: ^Ast_Node, offsets: ^Scope
             fmt.sbprintfln(builder, "  mov %%eax, %v(%%rbp)", get_offset(offsets, o.left.variant.(Ident_Node).var_name))
 
         case Shift_Right_Equal_Node:
-            validate_lvalue(offsets, o.left)
             emit_expr(builder, o.right, offsets, info)
             fmt.sbprintln(builder, "  push %rcx") // rcx could be a function parameter, so we need to save it
             fmt.sbprintln(builder, "  mov %eax, %ecx")
@@ -1781,7 +2104,6 @@ emit_expr :: proc(builder: ^strings.Builder, expr: ^Ast_Node, vars: ^Scoped_Vari
             fmt.sbprintfln(builder, "  mov $%v, %%eax", e.value)
 
         case Ident_Node:
-            if !is_defined(vars, e.var_name) do semantic_error()
             fmt.sbprintfln(builder, "  mov %v(%%rbp), %%eax", get_offset(vars, e.var_name))
 
         case Negate_Node: emit_unary_op(builder, expr, vars, info)
@@ -1877,20 +2199,21 @@ emit_expr :: proc(builder: ^strings.Builder, expr: ^Ast_Node, vars: ^Scoped_Vari
 }
 
 emit_block_item :: proc(builder: ^strings.Builder, block_item: ^Ast_Node, offsets: ^Scoped_Variable_Offsets, info: ^Emit_Info, function_name: string) {
-    #partial switch stmt in block_item.variant {
+    #partial switch item in block_item.variant {
         case Decl_Assign_Node:
-            if stmt.var_name in offsets.var_offsets do semantic_error()
-            offsets.var_offsets[stmt.var_name] = info.variable_offset
+            offsets.offsets[item.var_name] = info.variable_offset
             info.variable_offset -= 8
-            emit_expr(builder, stmt.right, offsets, info)
-            fmt.sbprintfln(builder, "  mov %%eax, %v(%%rbp)", get_offset(offsets, stmt.var_name))
+            emit_expr(builder, item.right, offsets, info)
+            fmt.sbprintfln(builder, "  mov %%eax, %v(%%rbp)", get_offset(offsets, item.var_name))
 
         case Decl_Node: // Space on the stack is already allocated by emit_function
-            if stmt.var_name in offsets.var_offsets do semantic_error()
-            offsets.var_offsets[stmt.var_name] = info.variable_offset
+            offsets.offsets[item.var_name] = info.variable_offset
             info.variable_offset -= 8
 
         case Function_Declaration_Node: // Do nothing
+
+        case Function_Definition_Node: // This is a semantic error, but will be caught in the validation step
+            panic("Unreachable")
 
         case:
             emit_statement(builder, block_item, offsets, info, function_name)
@@ -2048,18 +2371,6 @@ emit_statement :: proc(builder: ^strings.Builder, statement: ^Ast_Node, parent_o
     }
 }
 
-Scoped_Variable_Offsets :: struct {
-    parent: ^Scoped_Variable_Offsets,
-    var_offsets: map[string]int,
-}
-
-make_scoped_variable_offsets :: proc(parent: ^Scoped_Variable_Offsets) -> ^Scoped_Variable_Offsets {
-    vars := new(Scoped_Variable_Offsets)
-    vars.parent = parent
-    vars.var_offsets = make(map[string]int)
-    return vars
-}
-
 count_function_variable_declarations :: proc(function: Function_Definition_Node) -> int {
     declarations := 0
 
@@ -2175,23 +2486,23 @@ emit_function :: proc(builder: ^strings.Builder, function: Function_Definition_N
     offsets := make_scoped_variable_offsets(parent_offsets)
     if len(function.params) > 0 {
         fmt.sbprintln(builder, "  mov %rcx, -8(%rbp)")
-        offsets.var_offsets[function.params[0]] = -8
+        offsets.offsets[function.params[0]] = -8
     }
     if len(function.params) > 1 {
         fmt.sbprintln(builder, "  mov %rdx, -16(%rbp)")
-        offsets.var_offsets[function.params[1]] = -16
+        offsets.offsets[function.params[1]] = -16
     }
     if len(function.params) > 2 {
         fmt.sbprintln(builder, "  mov %r8, -24(%rbp)")
-        offsets.var_offsets[function.params[2]] = -24
+        offsets.offsets[function.params[2]] = -24
     }
     if len(function.params) > 3 {
         fmt.sbprintln(builder, "  mov %r9, -32(%rbp)")
-        offsets.var_offsets[function.params[3]] = -32
+        offsets.offsets[function.params[3]] = -32
     }
     if len(function.params) > 4 {
         #reverse for param, i in function.params[4:] {
-            offsets.var_offsets[param] = i * 8 + 16 // Add 16 to allow for the CALL instruction pushing RIP and flags on the stack
+            offsets.offsets[param] = i * 8 + 16 // Add 16 to allow for the CALL instruction pushing RIP and flags on the stack
         }
     }
 
@@ -2239,6 +2550,8 @@ compile_to_assembly :: proc(source_file: string) -> (asm_file: string) {
         fmt.println("------ AST ------")
         pretty_print_program(program)
     }
+
+    validate_program(program)
 
     assembly := emit(program)
     when LOG {
