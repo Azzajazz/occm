@@ -1,0 +1,3 @@
+exit_code: 1
+stdout: b'    2  | \\\n         ^\n'
+stderr: b'chapter_1\\invalid_lex\\backslash.c(2:1) Lex error! Unexpected character \\\n'

@@ -1,0 +1,3 @@
+exit_code: 1
+stdout: b'    2  |     return 1 ? 2 ? 3 : 4;\n                                 ^\n'
+stderr: b'chapter_6\\invalid_parse\\malformed_ternary_2.c(2:26) Parse error! Expected a colon after ternary condition.\n'

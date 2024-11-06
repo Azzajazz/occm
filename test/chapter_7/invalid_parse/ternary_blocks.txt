@@ -1,0 +1,3 @@
+exit_code: 1
+stdout: b'    3  |     return 1 ? { a = 2 } : a = 4;\n                        ^\n'
+stderr: b'chapter_7\\invalid_parse\\ternary_blocks.c(3:17) Parse error! Expected an expression term.\n'

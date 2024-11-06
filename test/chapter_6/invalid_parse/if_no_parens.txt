@@ -1,0 +1,3 @@
+exit_code: 1
+stdout: b'    2  |     if 0 return 1;\n                ^\n'
+stderr: b"chapter_6\\invalid_parse\\if_no_parens.c(2:9) Parse error! Expected a '(' before if condition.\n"

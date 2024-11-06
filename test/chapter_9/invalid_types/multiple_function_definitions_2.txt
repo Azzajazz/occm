@@ -1,0 +1,3 @@
+exit_code: 0
+stdout: b''
+stderr: b"multiple_function_definitions_2.s: Assembler messages:\r\nmultiple_function_definitions_2.s:25: Error: symbol `foo' is already defined\r\nmultiple_function_definitions_2.s:31: Error: symbol `foo_done' is already defined\r\nFailed to compile multiple_function_definitions_2.s with gcc\n"

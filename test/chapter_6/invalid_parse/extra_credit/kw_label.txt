@@ -1,0 +1,3 @@
+exit_code: 1
+stdout: b'    2  |     return: return 0;\n                  ^\n'
+stderr: b'chapter_6\\invalid_parse\\extra_credit\\kw_label.c(2:12) Parse error! Expected an expression term.\n'

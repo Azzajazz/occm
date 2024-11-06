@@ -1,0 +1,3 @@
+exit_code: 1
+stdout: b'    5  |     return 2;\n             ^^^^^^\n'
+stderr: b"chapter_7\\invalid_parse\\extra_brace.c(5:11) Parse error! Expected 'int' as start of function signature.\n"

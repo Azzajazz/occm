@@ -1,2 +1,3 @@
 exit_code: 31
 stdout: b''
+stderr: b''

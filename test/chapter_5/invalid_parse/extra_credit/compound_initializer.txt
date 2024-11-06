@@ -1,0 +1,3 @@
+exit_code: 1
+stdout: b'    2  |     int a += 0;\n             ^^^\n'
+stderr: b'chapter_5\\invalid_parse\\extra_credit\\compound_initializer.c(2:13) Parse error! Expected a function or variable declaration.\n'

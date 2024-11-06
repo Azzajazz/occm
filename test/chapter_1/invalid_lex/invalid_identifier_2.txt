@@ -1,0 +1,3 @@
+exit_code: 1
+stdout: b'    3  |     return @b;\n                    ^\n'
+stderr: b'chapter_1\\invalid_lex\\invalid_identifier_2.c(3:12) Lex error! Unexpected character @\n'

@@ -1,0 +1,3 @@
+exit_code: 1
+stdout: b'    2  |     return 1 + 2);\n                         ^\n'
+stderr: b"chapter_3\\invalid_parse\\missing_open_paren.c(2:18) Parse error! Expected a semicolon after 'return' statement.\n"

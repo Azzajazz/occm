@@ -1,0 +1,3 @@
+exit_code: 1
+stdout: b'    7  |     else\n             ^^^^\n'
+stderr: b'chapter_6\\invalid_parse\\mismatched_nesting.c(7:9) Parse error! Expected an expression term.\n'

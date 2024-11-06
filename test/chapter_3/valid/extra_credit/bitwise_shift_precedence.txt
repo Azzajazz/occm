@@ -1,2 +1,3 @@
 exit_code: 1310720
 stdout: b''
+stderr: b''

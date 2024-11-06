@@ -1,0 +1,3 @@
+exit_code: 1
+stdout: b'    4  |     }; while(1);\n              ^\n'
+stderr: b"chapter_8\\invalid_parse\\do_extra_semicolon.c(4:7) Parse error! Expected a 'while' after 'do' loop body.\n"

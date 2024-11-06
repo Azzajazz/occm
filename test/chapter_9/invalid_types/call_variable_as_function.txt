@@ -1,0 +1,3 @@
+exit_code: 0
+stdout: b''
+stderr: b"c:/programdata/chocolatey/lib/mingw/tools/install/mingw64/bin/../lib/gcc/x86_64-w64-mingw32/10.2.0/../../../../x86_64-w64-mingw32/bin/ld.exe: C:\\Users\\Adam\\AppData\\Local\\Temp\\ccdVbebT.o:fake:(.text+0x11): undefined reference to `x'\r\ncollect2.exe: error: ld returned 1 exit status\nFailed to compile call_variable_as_function.s with gcc\n"

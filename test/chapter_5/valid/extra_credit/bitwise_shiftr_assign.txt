@@ -1,2 +1,3 @@
 exit_code: 77
 stdout: b''
+stderr: b''

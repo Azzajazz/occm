@@ -1,2 +1,3 @@
 exit_code: 23910
 stdout: b''
+stderr: b''

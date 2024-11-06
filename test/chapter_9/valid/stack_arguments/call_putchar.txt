@@ -1,2 +1,3 @@
 exit_code: 8
 stdout: b'A'
+stderr: b''

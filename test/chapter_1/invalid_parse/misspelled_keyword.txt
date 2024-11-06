@@ -1,0 +1,3 @@
+exit_code: 1
+stdout: b'    2  |     returns 0;\n                     ^\n'
+stderr: b'chapter_1\\invalid_parse\\misspelled_keyword.c(2:14) Parse error! Expected a semicolon after expression statement.\n'

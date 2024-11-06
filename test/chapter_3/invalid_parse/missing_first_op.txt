@@ -1,0 +1,3 @@
+exit_code: 1
+stdout: b'    2  |     return /3;\n                    ^\n'
+stderr: b'chapter_3\\invalid_parse\\missing_first_op.c(2:13) Parse error! Expected an expression term.\n'

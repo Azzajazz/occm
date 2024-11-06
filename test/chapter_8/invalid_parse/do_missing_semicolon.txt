@@ -1,0 +1,3 @@
+exit_code: 1
+stdout: b'    5  |     return 0;\n             ^^^^^^\n'
+stderr: b"chapter_8\\invalid_parse\\do_missing_semicolon.c(5:11) Parse error! Expected a semicolon after 'do' loop.\n"

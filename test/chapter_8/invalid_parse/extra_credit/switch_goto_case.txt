@@ -1,0 +1,3 @@
+exit_code: 1
+stdout: b'    2  |     goto 3;\n                  ^\n'
+stderr: b"chapter_8\\invalid_parse\\extra_credit\\switch_goto_case.c(2:11) Parse error! Expected a label name after 'goto'.\n"

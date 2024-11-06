@@ -1,0 +1,3 @@
+exit_code: 1
+stdout: b'    2  |     return 1 + (2;)\n                          ^\n'
+stderr: b'chapter_3\\invalid_parse\\misplaced_semicolon.c(2:19) Parse error! Mismatched brackets in expression.\n'

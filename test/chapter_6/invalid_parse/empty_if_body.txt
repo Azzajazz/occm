@@ -1,0 +1,3 @@
+exit_code: 1
+stdout: b'    2  |     if (0) else return 0;\n                    ^^^^\n'
+stderr: b'chapter_6\\invalid_parse\\empty_if_body.c(2:16) Parse error! Expected an expression term.\n'

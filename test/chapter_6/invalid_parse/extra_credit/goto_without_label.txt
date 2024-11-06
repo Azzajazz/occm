@@ -1,0 +1,3 @@
+exit_code: 1
+stdout: b'    2  |     goto;\n                 ^\n'
+stderr: b"chapter_6\\invalid_parse\\extra_credit\\goto_without_label.c(2:10) Parse error! Expected a label name after 'goto'.\n"

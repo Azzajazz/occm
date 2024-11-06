@@ -1,2 +1,3 @@
 exit_code: 2
 stdout: b''
+stderr: b''

@@ -1,0 +1,3 @@
+exit_code: 1
+stdout: b'    2  |     switch 3 {\n                    ^\n'
+stderr: b"chapter_8\\invalid_parse\\extra_credit\\switch_missing_paren.c(2:13) Parse error! Expected a '(' before 'switch' expression.\n"

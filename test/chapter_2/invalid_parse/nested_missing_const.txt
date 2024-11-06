@@ -1,0 +1,3 @@
+exit_code: 1
+stdout: b'    3  |     return -~;\n                      ^\n'
+stderr: b'chapter_2\\invalid_parse\\nested_missing_const.c(3:15) Parse error! Expected an expression term.\n'

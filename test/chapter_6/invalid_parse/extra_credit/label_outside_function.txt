@@ -1,0 +1,3 @@
+exit_code: 1
+stdout: b'    1  | label:\n         ^^^^^\n'
+stderr: b"chapter_6\\invalid_parse\\extra_credit\\label_outside_function.c(1:6) Parse error! Expected 'int' as start of function signature.\n"

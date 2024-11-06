@@ -1,0 +1,3 @@
+exit_code: 1
+stdout: b'    5  |     x()--;\n              ^^\n'
+stderr: b'chapter_9\\invalid_declarations\\extra_credit\\decrement_fun_call.c(5:10) Parse error! Expected a semicolon after expression statement.\n'

@@ -1,0 +1,3 @@
+exit_code: 1
+stdout: b'    2  |     retur n 0;\n                   ^\n'
+stderr: b'chapter_1\\invalid_parse\\space_in_keyword.c(2:12) Parse error! Expected a semicolon after expression statement.\n'

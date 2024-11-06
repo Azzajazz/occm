@@ -1,0 +1,3 @@
+exit_code: 1
+stdout: b'    2  |     for (int i = 0;)\n                            ^\n'
+stderr: b'chapter_8\\invalid_parse\\missing_for_header_clause.c(2:21) Parse error! Expected an expression term.\n'

@@ -1,2 +1,3 @@
 exit_code: 62
 stdout: b''
+stderr: b''

@@ -1,0 +1,3 @@
+exit_code: 1
+stdout: b''
+stderr: b'Semantic error in D:/Dev/Odin/occm/occm.odin(1926:13)\n'

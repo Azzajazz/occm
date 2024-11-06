@@ -1,2 +1,3 @@
 exit_code: 140
 stdout: b''
+stderr: b''

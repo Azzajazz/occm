@@ -1,0 +1,3 @@
+exit_code: 1
+stdout: b'    4  | }\n         ^\n'
+stderr: b"chapter_4\\invalid_parse\\unary_missing_semicolon.c(4:2) Parse error! Expected a semicolon after 'return' statement.\n"

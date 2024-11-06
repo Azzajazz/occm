@@ -1,0 +1,3 @@
+exit_code: 1
+stdout: b''
+stderr: b'chapter_8\\invalid_parse\\extra_credit\\switch_case_declaration.c(4:16) Parse error! Declarations cannot have labels.\n'
