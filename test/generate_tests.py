@@ -6,9 +6,6 @@ import subprocess
 import exp_files
 from common import *
 
-def is_test_case_of_type(path: Path, ty: str) -> bool:
-    return f"\\{ty}" in str(path)
-
 def write_exp_file(exp_file_path: Path, process_result: subprocess.CompletedProcess):
     print(f"Generating {exp_file_path}")
     with open(exp_file_path, "w") as f:
