@@ -1543,7 +1543,7 @@ validate_statement :: proc(statement: ^Ast_Node, info: ^Validation_Info, scoped_
 
         case Continue_Node:
             if len(info.control_flows) == 0 || slice.last(info.control_flows[:]) != .Loop {
-                semantic_error("'continue' statements must be inside a 'switch' or a loop")
+                semantic_error("'continue' statements must be inside a loop")
             }
 
         case Break_Node:
