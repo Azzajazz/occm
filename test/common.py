@@ -1,5 +1,6 @@
 from pathlib import Path
 import os
+import sys
 import subprocess
 
 test_groups = [
@@ -1663,5 +1664,5 @@ def rebuild_compiler():
         )               
     if build_result.returncode != 0:
         print("ABORT: Compiler build failed")
-        return
+        sys.exit(1)
     os.chdir("test")
