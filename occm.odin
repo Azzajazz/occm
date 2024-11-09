@@ -1413,6 +1413,17 @@ is_defined_variable :: proc(scoped_info: ^Scoped_Validation_Info, var_name: stri
     }
 }
 
+is_defined_function :: proc(scoped_info: ^Scoped_Validation_Info, func_name: string) -> bool {
+    if scoped_info.parent == nil do return func_name in scoped_info.function_names
+
+    if func_name in scoped_info.function_names {
+        return true
+    }
+    else {
+        return is_defined_function(scoped_info.parent, func_name)
+    }
+}
+
 make_scoped_validation_info :: proc(parent: ^Scoped_Validation_Info) -> ^Scoped_Validation_Info {
     scoped_info := new(Scoped_Validation_Info)
     scoped_info.parent = parent
@@ -1689,7 +1700,7 @@ validate_expr :: proc(expr: ^Ast_Node, info: ^Validation_Info, scoped_info: ^Sco
             validate_expr(e.if_false, info, scoped_info)
 
         case Function_Call_Node:
-            if e.name not_in scoped_info.function_names do semantic_error("Function used before it is declared")
+            if !is_defined_function(scoped_info, e.name) do semantic_error("Function used before it is declared")
             for arg in e.args {
                 validate_expr(arg, info, scoped_info)
             }
