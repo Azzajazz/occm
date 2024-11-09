@@ -4,7 +4,7 @@ import argparse
 import subprocess
 
 import exp_files
-from common import *
+import common
 
 def write_exp_file(exp_file_path: Path, process_result: subprocess.CompletedProcess):
     print(f"Generating {exp_file_path}")
@@ -14,32 +14,28 @@ def write_exp_file(exp_file_path: Path, process_result: subprocess.CompletedProc
         f.write(f"stderr: {process_result.stderr}\n")
 
 def generate_exp_files_with_gcc(base_path: Path):
-    if base_path.is_file():
-        if is_test_case_of_type(base_path, "valid"):
-            generate_valid_exp_file(base_path)
-        elif is_test_case_of_type(base_path, "invalid"):
-            generate_invalid_exp_file(base_path)
-    else:
-        files = base_path.glob(f"**\\*.c")
-        for file in files:
-            if is_test_case_of_type(file, "valid"): generate_valid_exp_file(file)
-            elif is_test_case_of_type(file, "invalid"): generate_invalid_exp_file(file)
+    groups = common.get_test_groups(base_path)
+    for group in groups:
+        if common.is_test_case_of_type(group[0], "valid"):
+            generate_valid_exp_file(group)
+        elif common.is_test_case_of_type(group[0], "invalid"):
+            generate_invalid_exp_file(group)
 
-def generate_valid_exp_file(path: Path):
-    compile_result = subprocess.run(["gcc", "-O0", path])
+def generate_valid_exp_file(paths: list[Path]):
+    compile_result = subprocess.run(["gcc", "-O0"] + paths)
     # @HACK: If we get here, we should always be able to compile. However, the current compilation strategy doesn't always succeed.
     if compile_result.returncode != 0:
         return
     run_result = subprocess.run("a.exe", capture_output=True)
-    exp_file_path = exp_files.exp_file_path_from_source_path(path)
+    exp_file_path = exp_files.exp_file_path_from_source_path(paths[0])
     write_exp_file(exp_file_path, run_result)
     os.remove("a.exe")
 
-def generate_invalid_exp_file(path: Path):
-    compile_result = subprocess.run(["..\occm.exe", path], capture_output=True)
-    exp_file_path = exp_files.exp_file_path_from_source_path(path)
+def generate_invalid_exp_file(paths: list[Path]):
+    compile_result = subprocess.run(["..\occm.exe"] + paths, capture_output=True)
+    exp_file_path = exp_files.exp_file_path_from_source_path(paths[0])
     write_exp_file(exp_file_path, compile_result)
-    assert(not Path(path.with_suffix(".exe").name).exists())
+    assert(not Path(paths[0].with_suffix(".exe").name).exists())
 
 def main():
     parser = argparse.ArgumentParser()
@@ -50,7 +46,7 @@ def main():
     args = parser.parse_args()
 
     if not args.norebuild:
-        rebuild_compiler()
+        common.rebuild_compiler()
 
     if args.path:
         generate_exp_files_with_gcc(Path(args.path))
