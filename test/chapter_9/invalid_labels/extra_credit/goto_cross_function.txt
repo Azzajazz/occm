@@ -1,3 +1,3 @@
 exit_code: 1
 stdout: b''
-stderr: b'Semantic error!\n'
+stderr: b'Semantic error! Label does not exist\n'
