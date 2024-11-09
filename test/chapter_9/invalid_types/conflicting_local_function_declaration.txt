@@ -1,3 +1,3 @@
-exit_code: 0
+exit_code: 1
 stdout: b''
-stderr: b"c:/programdata/chocolatey/lib/mingw/tools/install/mingw64/bin/../lib/gcc/x86_64-w64-mingw32/10.2.0/../../../../x86_64-w64-mingw32/bin/ld.exe: C:\\Users\\Adam\\AppData\\Local\\Temp\\ccZh9yY8.o:fake:(.text+0x17): undefined reference to `foo'\r\nc:/programdata/chocolatey/lib/mingw/tools/install/mingw64/bin/../lib/gcc/x86_64-w64-mingw32/10.2.0/../../../../x86_64-w64-mingw32/bin/ld.exe: C:\\Users\\Adam\\AppData\\Local\\Temp\\ccZh9yY8.o:fake:(.text+0x41): undefined reference to `foo'\r\ncollect2.exe: error: ld returned 1 exit status\nFailed to compile conflicting_local_function_declaration.s with gcc\n"
+stderr: b'Semantic error!\n'

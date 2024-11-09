@@ -1,7 +1,7 @@
     # generated from templates/stack_alignment_check.s.jinja
     .text
-    .globl _even_arguments
-_even_arguments:
+    .globl even_arguments
+even_arguments:
     pushq   %rbp
     movq    %rsp, %rbp
     # validate arguments, from 1 to 8
@@ -40,8 +40,8 @@ Lfail_even_arguments:
     call    _exit
     popq    %rbp
     retq
-    .globl _odd_arguments
-_odd_arguments:
+    .globl odd_arguments
+odd_arguments:
     pushq   %rbp
     movq    %rsp, %rbp
     # validate arguments, from 1 to 7
