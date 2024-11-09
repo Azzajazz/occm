@@ -1542,7 +1542,9 @@ validate_statement :: proc(statement: ^Ast_Node, info: ^Validation_Info, scoped_
             pop(&info.control_flows)
 
         case Continue_Node:
-            if len(info.control_flows) == 0 do semantic_error("'continue' statements must be inside a 'switch' or a loop")
+            if len(info.control_flows) == 0 || slice.last(info.control_flows[:]) != .Loop {
+                semantic_error("'continue' statements must be inside a 'switch' or a loop")
+            }
 
         case Break_Node:
             if len(info.control_flows) == 0 do semantic_error("'break' statements must be inside a 'switch' or a loop")
@@ -1722,7 +1724,6 @@ Switch_Info :: struct {
     start_label: int,
     current_label: int,
     labels: [dynamic]Label,
-    has_default: bool,
 }
 
 switch_end_label :: proc(info: Switch_Info) -> int {
@@ -2429,6 +2430,7 @@ get_switch_labels :: proc(info: ^Switch_Info, statement: ^Ast_Node) {
     for label in statement.labels {
         #partial switch l in label {
             case int, Default_Label:
+                if contains(label, info.labels[:]) do semantic_error("Duplicate 'case' or 'default' label")
                 append(&info.labels, label)
         }
     }
