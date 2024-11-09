@@ -1325,7 +1325,7 @@ contains :: proc(elem: $E, list: $L/[]E) -> bool {
 // NOTE: This could be more efficient, but it is currently used on small lists.
 contains_duplicate :: proc(list: $L/[]$E) -> bool {
     for i in 0..<len(list) {
-        for j in i..<len(list) {
+        for j in i + 1..<len(list) {
             if list[i] == list[j] do return true
         }
     }
@@ -1388,21 +1388,6 @@ get_offset :: proc(offsets: ^Scoped_Variable_Offsets, var_name: string) -> int {
 is_lvalue :: proc(info: ^Scoped_Validation_Info, lvalue: ^Ast_Node) -> bool {
     ident, is_ident := lvalue.variant.(Ident_Node)
     return is_ident && is_defined_variable(info, ident.var_name)
-}
-
-validate_function_declarations_and_definitions :: proc(program: Program) {
-    for function in program.children {
-        #partial switch func in function.variant {
-            case Function_Declaration_Node:
-                if contains_duplicate(func.params[:]) do semantic_error("Duplicate function parameters not allowed")
-
-            case Function_Definition_Node:
-                if contains_duplicate(func.params[:]) do semantic_error("Duplicate function parameters not allowed")
-
-            case:
-                panic("Unreachable")
-        }
-    }
 }
 
 String_Set :: map[string]struct{}
