@@ -781,7 +781,7 @@ parse_labels :: proc(parser: ^Parser) -> [dynamic]Label {
                 take_token(&parser.lexer)
                 token = take_token(&parser.lexer)
                 if token.type == .Colon do parse_error(parser, "Expected a constant in 'case' label", span_token(token))
-                if token.type != .IntConstant do semantic_error() // @Temporary
+                if token.type != .IntConstant do semantic_error("'case' label must contain a constant") // @Temporary
                 constant := token.data.(int)
                 token = take_token(&parser.lexer)
                 if token.type != .Colon do parse_error(parser, "Expected a colon after label.", span_token(token))
@@ -1006,8 +1006,8 @@ parse_expression :: proc(parser: ^Parser, min_prec := 0) -> ^Ast_Node {
     return leaf
 }
 
-semantic_error :: proc() {
-    fmt.eprintln("Semantic error!")
+semantic_error :: proc(message: string) {
+    fmt.eprintfln("Semantic error! %v", message)
     os.exit(1)
 }
 
@@ -1334,7 +1334,7 @@ contains_duplicate :: proc(list: $L/[]$E) -> bool {
 
 validate_and_gather_block_item_labels :: proc(block_item: ^Ast_Node, labels: ^[dynamic]Label) {
     for label in block_item.labels {
-        if _, is_normal := label.(string); is_normal && contains(label, labels[:]) do semantic_error()
+        if _, is_normal := label.(string); is_normal && contains(label, labels[:]) do semantic_error("Duplicate labels not allowed.")
         append(labels, label)
     }
 
@@ -1394,10 +1394,10 @@ validate_function_declarations_and_definitions :: proc(program: Program) {
     for function in program.children {
         #partial switch func in function.variant {
             case Function_Declaration_Node:
-                if contains_duplicate(func.params[:]) do semantic_error()
+                if contains_duplicate(func.params[:]) do semantic_error("Duplicate function parameters not allowed")
 
             case Function_Definition_Node:
-                if contains_duplicate(func.params[:]) do semantic_error()
+                if contains_duplicate(func.params[:]) do semantic_error("Duplicate function parameters not allowed")
 
             case:
                 panic("Unreachable")
@@ -1452,11 +1452,11 @@ validate_program :: proc(program: Program) {
     for function in program.children {
         #partial switch func in function.variant {
             case Function_Declaration_Node:
-                if contains_duplicate(func.params[:]) do semantic_error()
+                if contains_duplicate(func.params[:]) do semantic_error("Duplicate function parameters not allowed")
                 scoped_info.function_names[func.name] = {}
 
             case Function_Definition_Node:
-                if contains_duplicate(func.params[:]) do semantic_error()
+                if contains_duplicate(func.params[:]) do semantic_error("Duplicate function parameters not allowed")
                 labels := validate_and_gather_function_labels(func)
                 scoped_info.function_names[func.name] = {}
 
@@ -1479,22 +1479,22 @@ validate_program :: proc(program: Program) {
 validate_block_item :: proc(block_item: ^Ast_Node, info: ^Validation_Info, scoped_info: ^Scoped_Validation_Info, labels: []Label) {
     #partial switch item in block_item.variant {
         case Decl_Assign_Node:
-            if item.var_name in scoped_info.variable_names do semantic_error()
-            if item.var_name in scoped_info.function_names do semantic_error()
+            if item.var_name in scoped_info.variable_names do semantic_error("Duplicate declarations of the same variable is not allowed")
+            if item.var_name in scoped_info.function_names do semantic_error("Variable names must be distinct from function names")
             scoped_info.variable_names[item.var_name] = {}
             validate_expr(item.right, info, scoped_info)
 
         case Decl_Node: // Space on the stack is already allocated by emit_function
-            if item.var_name in scoped_info.variable_names do semantic_error()
-            if item.var_name in scoped_info.function_names do semantic_error()
+            if item.var_name in scoped_info.variable_names do semantic_error("Duplicate declarations of the same variable is not allowed")
+            if item.var_name in scoped_info.function_names do semantic_error("Variable names must be distinct from function names")
             scoped_info.variable_names[item.var_name] = {}
 
         case Function_Declaration_Node:
-            if item.name in scoped_info.variable_names do semantic_error()
+            if item.name in scoped_info.variable_names do semantic_error("Function names must be distinct from variable names")
             scoped_info.function_names[item.name] = {}
 
         case Function_Definition_Node:
-            semantic_error() // Function definitions cannot be nested in scopes
+            semantic_error("Function definitions cannot be nested in scopes")
 
         case:
             validate_statement(block_item, info, scoped_info, labels)
@@ -1542,13 +1542,13 @@ validate_statement :: proc(statement: ^Ast_Node, info: ^Validation_Info, scoped_
             pop(&info.control_flows)
 
         case Continue_Node:
-            if len(info.control_flows) == 0 do semantic_error()
+            if len(info.control_flows) == 0 do semantic_error("'continue' statements must be inside a 'switch' or a loop")
 
         case Break_Node:
-            if len(info.control_flows) == 0 do semantic_error()
+            if len(info.control_flows) == 0 do semantic_error("'break' statements must be inside a 'switch' or a loop")
 
         case Goto_Node:
-            if !contains(cast(Label)stmt.label, labels) do semantic_error()
+            if !contains(cast(Label)stmt.label, labels) do semantic_error("Label does not exist")
 
         case Switch_Node:
             append(&info.control_flows, Containing_Control_Flow.Switch)
@@ -1574,7 +1574,7 @@ validate_expr :: proc(expr: ^Ast_Node, info: ^Validation_Info, scoped_info: ^Sco
         case Int_Constant_Node: // Do nothing
 
         case Ident_Node:
-            if !is_defined_variable(scoped_info, e.var_name) do semantic_error()
+            if !is_defined_variable(scoped_info, e.var_name) do semantic_error("Identifier is used before it is declared")
 
         case Negate_Node:
             validate_expr(e.expr, info, scoped_info)
@@ -1583,16 +1583,16 @@ validate_expr :: proc(expr: ^Ast_Node, info: ^Validation_Info, scoped_info: ^Sco
         case Boolean_Negate_Node:
             validate_expr(e.expr, info, scoped_info)
         case Pre_Decrement_Node:
-            if !is_lvalue(scoped_info, e.expr) do semantic_error()
+            if !is_lvalue(scoped_info, e.expr) do semantic_error("Not an lvalue")
             validate_expr(e.expr, info, scoped_info)
         case Pre_Increment_Node:
-            if !is_lvalue(scoped_info, e.expr) do semantic_error()
+            if !is_lvalue(scoped_info, e.expr) do semantic_error("Not an lvalue")
             validate_expr(e.expr, info, scoped_info)
         case Post_Decrement_Node:
-            if !is_lvalue(scoped_info, e.expr) do semantic_error()
+            if !is_lvalue(scoped_info, e.expr) do semantic_error("Not an lvalue")
             validate_expr(e.expr, info, scoped_info)
         case Post_Increment_Node:
-            if !is_lvalue(scoped_info, e.expr) do semantic_error()
+            if !is_lvalue(scoped_info, e.expr) do semantic_error("Not an lvalue")
             validate_expr(e.expr, info, scoped_info)
             
 
@@ -1652,47 +1652,47 @@ validate_expr :: proc(expr: ^Ast_Node, info: ^Validation_Info, scoped_info: ^Sco
             validate_expr(e.right, info, scoped_info)
 
         case Equal_Node:
-            if !is_lvalue(scoped_info, e.left) do semantic_error()
+            if !is_lvalue(scoped_info, e.left) do semantic_error("Not an lvalue")
             validate_expr(e.left, info, scoped_info)
             validate_expr(e.right, info, scoped_info)
         case Plus_Equal_Node:
-            if !is_lvalue(scoped_info, e.left) do semantic_error()
+            if !is_lvalue(scoped_info, e.left) do semantic_error("Not an lvalue")
             validate_expr(e.left, info, scoped_info)
             validate_expr(e.right, info, scoped_info)
         case Minus_Equal_Node:
-            if !is_lvalue(scoped_info, e.left) do semantic_error()
+            if !is_lvalue(scoped_info, e.left) do semantic_error("Not an lvalue")
             validate_expr(e.left, info, scoped_info)
             validate_expr(e.right, info, scoped_info)
         case Times_Equal_Node:
-            if !is_lvalue(scoped_info, e.left) do semantic_error()
+            if !is_lvalue(scoped_info, e.left) do semantic_error("Not an lvalue")
             validate_expr(e.left, info, scoped_info)
             validate_expr(e.right, info, scoped_info)
         case Divide_Equal_Node:
-            if !is_lvalue(scoped_info, e.left) do semantic_error()
+            if !is_lvalue(scoped_info, e.left) do semantic_error("Not an lvalue")
             validate_expr(e.left, info, scoped_info)
             validate_expr(e.right, info, scoped_info)
         case Modulo_Equal_Node:
-            if !is_lvalue(scoped_info, e.left) do semantic_error()
+            if !is_lvalue(scoped_info, e.left) do semantic_error("Not an lvalue")
             validate_expr(e.left, info, scoped_info)
             validate_expr(e.right, info, scoped_info)
         case Xor_Equal_Node:
-            if !is_lvalue(scoped_info, e.left) do semantic_error()
+            if !is_lvalue(scoped_info, e.left) do semantic_error("Not an lvalue")
             validate_expr(e.left, info, scoped_info)
             validate_expr(e.right, info, scoped_info)
         case Or_Equal_Node:
-            if !is_lvalue(scoped_info, e.left) do semantic_error()
+            if !is_lvalue(scoped_info, e.left) do semantic_error("Not an lvalue")
             validate_expr(e.left, info, scoped_info)
             validate_expr(e.right, info, scoped_info)
         case And_Equal_Node:
-            if !is_lvalue(scoped_info, e.left) do semantic_error()
+            if !is_lvalue(scoped_info, e.left) do semantic_error("Not an lvalue")
             validate_expr(e.left, info, scoped_info)
             validate_expr(e.right, info, scoped_info)
         case Shift_Left_Equal_Node:
-            if !is_lvalue(scoped_info, e.left) do semantic_error()
+            if !is_lvalue(scoped_info, e.left) do semantic_error("Not an lvalue")
             validate_expr(e.left, info, scoped_info)
             validate_expr(e.right, info, scoped_info)
         case Shift_Right_Equal_Node:
-            if !is_lvalue(scoped_info, e.left) do semantic_error()
+            if !is_lvalue(scoped_info, e.left) do semantic_error("Not an lvalue")
             validate_expr(e.left, info, scoped_info)
             validate_expr(e.right, info, scoped_info)
 
@@ -1702,7 +1702,7 @@ validate_expr :: proc(expr: ^Ast_Node, info: ^Validation_Info, scoped_info: ^Sco
             validate_expr(e.if_false, info, scoped_info)
 
         case Function_Call_Node:
-            if e.name not_in scoped_info.function_names do semantic_error()
+            if e.name not_in scoped_info.function_names do semantic_error("Function used before it is declared")
             for arg in e.args {
                 validate_expr(arg, info, scoped_info)
             }
@@ -2227,7 +2227,7 @@ emit_statement :: proc(builder: ^strings.Builder, statement: ^Ast_Node, parent_o
             case string:
                 fmt.sbprintfln(builder, "_%v@%v:", l, function_name)
             case int, Default_Label:
-                if len(info.switch_infos) == 0 do semantic_error()
+                if len(info.switch_infos) == 0 do semantic_error("'case' and 'default' labels must be in a 'switch'")
                 switch_info := slice.last_ptr(info.switch_infos[:])
                 emit_label(builder, switch_info.current_label)
                 switch_info.current_label += 1
@@ -2316,11 +2316,9 @@ emit_statement :: proc(builder: ^strings.Builder, statement: ^Ast_Node, parent_o
             pop(&info.loop_labels)
 
         case Continue_Node:
-            if len(info.loop_labels) == 0 do semantic_error()
             fmt.sbprintfln(builder, "  jmp L%v", slice.last(info.loop_labels[:]).continue_label)
 
         case Break_Node:
-            if len(info.containing_control_flows) == 0 do semantic_error()
             last_control_flow := slice.last(info.containing_control_flows[:])
             if last_control_flow == .Loop {
                 fmt.sbprintfln(builder, "  jmp L%v", slice.last(info.loop_labels[:]).break_label)
@@ -2330,7 +2328,6 @@ emit_statement :: proc(builder: ^strings.Builder, statement: ^Ast_Node, parent_o
             }
 
         case Goto_Node:
-            if !contains(cast(Label)stmt.label, info.labels) do semantic_error()
             fmt.sbprintfln(builder, "  jmp _%v@%v", stmt.label, function_name)
 
         case Switch_Node:
@@ -2432,7 +2429,6 @@ get_switch_labels :: proc(info: ^Switch_Info, statement: ^Ast_Node) {
     for label in statement.labels {
         #partial switch l in label {
             case int, Default_Label:
-                if contains(label, info.labels[:]) do semantic_error()
                 append(&info.labels, label)
         }
     }
