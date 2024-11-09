@@ -4,7 +4,7 @@ import subprocess
 import argparse
 
 import exp_files
-from common import *
+import common
 
 class Stats:
     passed_count = 0
@@ -30,10 +30,10 @@ def compare_to_exp_file(process_result: subprocess.CompletedProcess, exp_file: e
         return False
     return True
 
-def do_valid_test(source_path: Path, stats: Stats):
-    print(f"Running test {source_path}:  ", end = "")
+def do_valid_test(paths: list[Path], stats: Stats):
+    print(f"Running test {paths[0]}:  ", end = "")
     compile_result = subprocess.run(
-            ["../occm.exe", source_path],
+            ["../occm.exe"] + paths,
             stdout=subprocess.DEVNULL,
             stderr=subprocess.DEVNULL
         )
@@ -41,44 +41,38 @@ def do_valid_test(source_path: Path, stats: Stats):
         stats.failed("Compilation unsuccessful")
         return
 
-    exec_path = Path(source_path.with_suffix(".exe").name)
-    exp_file_path = exp_files.exp_file_path_from_source_path(source_path)
+    exec_path = Path(paths[0].with_suffix(".exe").name)
+    exp_file_path = exp_files.exp_file_path_from_source_path(paths[0])
     exp_file = exp_files.ExpFile(exp_file_path)
     run_result = subprocess.run([exec_path], capture_output=True)
     if compare_to_exp_file(run_result, exp_file, stats):
         stats.passed()
     os.remove(exec_path)
 
-def do_invalid_test(source_path: Path, stats: Stats):
-    print(f"Running test {source_path}:  ", end = "")
-    compile_result = subprocess.run(["../occm.exe", source_path], capture_output=True)
-    exp_file_path = exp_files.exp_file_path_from_source_path(source_path)
+def do_invalid_test(paths: list[Path], stats: Stats):
+    print(f"Running test {paths[0]}:  ", end = "")
+    compile_result = subprocess.run(["../occm.exe"] + paths, capture_output=True)
+    exp_file_path = exp_files.exp_file_path_from_source_path(paths[0])
     exp_file = exp_files.ExpFile(exp_file_path)
     if not compare_to_exp_file(compile_result, exp_file, stats):
         return
     stderr = eval(exp_file.stderr)
-    if is_test_case_of_type(source_path, "invalid_lex") and b"Lex error" not in stderr:
-        print(exp_file.stderr)
+    if common.is_test_case_of_type(paths[0], "invalid_lex") and b"Lex error" not in stderr:
         stats.failed("Lexing succeeded, but should have failed")
-    elif is_test_case_of_type(source_path, "invalid_parse") and b"Parse error" not in stderr:
+    elif common.is_test_case_of_type(paths[0], "invalid_parse") and b"Parse error" not in stderr:
         stats.failed("Parsing succeeded, but should have failed")
-    elif is_test_case_of_type(source_path, "invalid_semantics") and b"Semantic error" not in stderr:
+    elif common.is_test_case_of_type(paths[0], "invalid_semantics") and b"Semantic error" not in stderr:
         stats.failed("Semantic checking succeeded, but should have failed")
     else:
         stats.passed()
                         
 def do_tests(base_path: Path, stats: Stats):
-    if base_path.is_file():
-        if is_test_case_of_type(base_path, "valid"):
-            do_valid_test(base_path, stats)
-        elif is_test_case_of_type(base_path, "invalid"):
-            do_invalid_test(base_path, stats)
-    
-    for file in base_path.glob("**\\*.c"):
-        if is_test_case_of_type(file, "valid"):
-            do_valid_test(file, stats)
-        elif is_test_case_of_type(file, "invalid"):
-            do_invalid_test(file, stats)
+    groups = common.get_test_groups(base_path)
+    for group in groups:
+        if common.is_test_case_of_type(group[0], "valid"):
+            do_valid_test(group, stats)
+        elif common.is_test_case_of_type(group[0], "invalid"):
+            do_invalid_test(group, stats)
 
 def main():
     parser = argparse.ArgumentParser()
@@ -91,7 +85,7 @@ def main():
     stats = Stats()
 
     if not args.norebuild:
-        rebuild_compiler()
+        common.rebuild_compiler()
 
     if args.path:
         do_tests(Path(args.path), stats)
