@@ -647,33 +647,33 @@ parse_program :: proc(parser: ^Parser) -> Program {
 }
 
 parse_function_definition_or_declaration :: proc(parser: ^Parser) -> ^Ast_Node {
-    signature := parse_function_signature(parser)
+    title := parse_function_title(parser)
 
     token := take_token(&parser.lexer)
     if token.type == .Semicolon {
-        return make_node_2(Function_Declaration_Node, signature.name, signature.params)
+        return make_node_2(Function_Declaration_Node, title.name, title.params)
     }
 
-    if token.type != .LBrace do parse_error(parser, "Expected a semicolon or block item list after function signature.", span_token(token))
+    if token.type != .LBrace do parse_error(parser, "Expected a semicolon or block item list after function title.", span_token(token))
     body := parse_block_item_list(parser)
-    return make_node_3(Function_Definition_Node, signature.name, signature.params, body)
+    return make_node_3(Function_Definition_Node, title.name, title.params, body)
 }
 
-Function_Signature :: struct {
+Function_Title :: struct {
     name: string,
     params: [dynamic]string,
 }
 
-parse_function_signature :: proc(parser: ^Parser) -> Function_Signature {
+parse_function_title :: proc(parser: ^Parser) -> Function_Title {
     token := take_token(&parser.lexer)
-    if token.type != .IntKeyword do parse_error(parser, "Expected 'int' as start of function signature.", span_token(token))
+    if token.type != .IntKeyword do parse_error(parser, "Expected 'int' as start of function title.", span_token(token))
 
     token = take_token(&parser.lexer)
-    if token.type != .Ident do parse_error(parser, "Expected an identifier in function signature.", span_token(token))
+    if token.type != .Ident do parse_error(parser, "Expected an identifier in function title.", span_token(token))
     name := token.text
 
     token = take_token(&parser.lexer)
-    if token.type != .LParen do parse_error(parser, "Expected parameters in function signature.", span_token(token))
+    if token.type != .LParen do parse_error(parser, "Expected parameters in function title.", span_token(token))
 
     params := make([dynamic]string)
     token = take_token(&parser.lexer)
@@ -695,10 +695,10 @@ parse_function_signature :: proc(parser: ^Parser) -> Function_Signature {
     }
     else if token.type == .VoidKeyword {
         token = take_token(&parser.lexer)
-        if token.type != .RParen do parse_error(parser, "If signatures contain 'void', they must not contain any other parameters.", span_token(token))
+        if token.type != .RParen do parse_error(parser, "If titles contain 'void', they must not contain any other parameters.", span_token(token))
     }
 
-    return Function_Signature{name, params}
+    return Function_Title{name, params}
 }
 
 parse_block_item_list :: proc(parser: ^Parser) -> [dynamic]^Ast_Node {
@@ -1012,11 +1012,11 @@ semantic_error :: proc(message: string) {
 }
 
 parse_function_declaration :: proc(parser: ^Parser) -> ^Ast_Node {
-    signature := parse_function_signature(parser)
+    title := parse_function_title(parser)
 
     token := take_token(&parser.lexer)
     if token.type != .Semicolon do parse_error(parser, "Expected a semicolon after function declaration.", span_token(token))
-    return make_node_2(Function_Declaration_Node, signature.name, signature.params)
+    return make_node_2(Function_Declaration_Node, title.name, title.params)
 }
 
 parse_statement :: proc(parser: ^Parser, labels: [dynamic]Label = nil) -> ^Ast_Node {
@@ -1299,21 +1299,6 @@ parse_postfix_operators :: proc(parser: ^Parser, inner: ^Ast_Node) -> ^Ast_Node 
 
     return inner
 }
-
-/*
-parse_function_definition :: proc(tokens: []Token) -> (^Ast_Node, []Token) {
-    signature, tokens := parse_function_signature(tokens)
-
-    token: Token = ---
-    token, tokens = take_first_token(tokens)
-    if token.type != .LBrace do parse_error(token, tokens)
-
-    body: [dynamic]^Ast_Node = ---
-    body, tokens = parse_block_item_list(tokens)
-
-    return make_node_3(Function_Definition_Node, signature.name, signature.params, body), tokens
-}
-*/
 
 contains :: proc(elem: $E, list: $L/[]E) -> bool {
     for e in list {
