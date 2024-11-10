@@ -1430,6 +1430,17 @@ has_conflicting_function_signature :: proc(scoped_info: ^Scoped_Validation_Info,
     return false
 }
 
+get_function_signature :: proc(scoped_info: ^Scoped_Validation_Info, name: string) -> Function_Signature {
+    scoped_info := scoped_info
+    for scoped_info != nil {
+        for sig in scoped_info.function_signatures {
+            if sig.name == name do return sig
+        }
+        scoped_info = scoped_info.parent
+    }
+    return Function_Signature{}
+}
+
 make_scoped_validation_info :: proc(parent: ^Scoped_Validation_Info) -> ^Scoped_Validation_Info {
     scoped_info := new(Scoped_Validation_Info)
     scoped_info.parent = parent
@@ -1728,6 +1739,8 @@ validate_expr :: proc(expr: ^Ast_Node, info: ^Validation_Info, scoped_info: ^Sco
 
         case Function_Call_Node:
             if !is_defined_function(scoped_info, e.name) do semantic_error("Function used before it is declared")
+            signature := get_function_signature(scoped_info, e.name)
+            if len(e.args) != len(signature.param_types) do semantic_error("Function called with wrong number of arguments")
             for arg in e.args {
                 validate_expr(arg, info, scoped_info)
             }
