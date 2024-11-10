@@ -1,3 +1,3 @@
 exit_code: 1
 stdout: b'    6  | int foo(void) = 3;\n                       ^\n'
-stderr: b'chapter_9\\invalid_parse\\initialize_function_as_variable.c(6:16) Parse error! Expected a semicolon or block item list after function signature.\n'
+stderr: b'chapter_9\\invalid_parse\\initialize_function_as_variable.c(6:16) Parse error! Expected a semicolon or block item list after function title.\n'
