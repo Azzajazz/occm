@@ -16,8 +16,8 @@ int main(void) {
      */
     int x = 3;
     // call some functions, check stack alignment
-    even_arguments(1, 2, 3, 4, 5, 6, 7, 8);
-    odd_arguments(1, 2, 3, 4, 5, 6, 7, 8, 9);
+    if (even_arguments(1, 2, 3, 4, 5, 6, 7, 8) == -1) return -1;
+    if (odd_arguments(1, 2, 3, 4, 5, 6, 7, 8, 9) == -1) return -1;
     // return x to make sure it hasn't been clobbered
     return x;
 }

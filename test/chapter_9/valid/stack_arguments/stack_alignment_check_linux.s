@@ -37,7 +37,6 @@ even_arguments:
 .Lfail_even_arguments:
     # exit w/ code -1
     movl    $-1, %edi
-    call    exit@PLT
     popq    %rbp
     retq
     .globl odd_arguments
@@ -75,7 +74,6 @@ odd_arguments:
 .Lfail_odd_arguments:
     # exit w/ code -1
     movl    $-1, %edi
-    call    exit@PLT
     popq    %rbp
     retq
 	# .section	".note.GNU-stack","",@progbits
