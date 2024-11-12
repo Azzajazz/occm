@@ -2599,56 +2599,77 @@ compile_to_assembly :: proc(source_file: string) -> (asm_file: string) {
     return asm_file
 }
 
-compile_from_file :: proc(source_file: string) -> (exec_file: string) {
-    asm_file := compile_to_assembly(source_file)
-    defer delete(asm_file)
-
-    file_base := path.stem(path.base(source_file))
+compile_from_files :: proc(source_files: []string) -> (exec_file: string) {
+    file_base := path.stem(path.base(source_files[0]))
     out_file := fmt.aprintf("%v.exe", file_base)
 
-    when LOG {
-        fmt.printfln("Compiling %v to %v using gcc", asm_file, out_file)
+    asm_files: [dynamic]string
+    defer delete(asm_files)
+
+    for file in source_files {
+        asm_file := compile_to_assembly(file)
+        append(&asm_files, asm_file)
+
+        when LOG {
+            fmt.printfln("Compiling %v to assembly...", asm_file)
+        }
     }
-    compile_with_gcc(asm_file, out_file)
+
+    compile_with_gcc(asm_files[:], out_file)
     
     when LOG {
-        fmt.printfln("Deleting %v", asm_file)
+        fmt.println("Deleting asm files...")
     }
-    os.remove(asm_file)
+    for asm_file in asm_files do os.remove(asm_file)
 
     return out_file
 }
 
-compile_with_gcc :: proc(in_file: string, out_file: string) {
-    exit_code := run_command_as_process("gcc %v -o %v", in_file, out_file)
+compile_with_gcc :: proc(in_files: []string, out_file: string) {
+    command: strings.Builder
+    strings.builder_init_none(&command, context.temp_allocator)
+    fmt.sbprintf(&command, "gcc ")
+    for file in in_files {
+        fmt.sbprintf(&command, "%v ", file)
+    }
+    fmt.sbprintf(&command, "-o %v", out_file)
+    exit_code := run_command_as_process(strings.to_string(command))
     if exit_code != 0 {
-        fmt.eprintfln("Failed to compile %v with gcc", in_file)
+        fmt.eprintfln("Failed to compile with gcc")
     }
 }
 
 usage :: proc() {
-    fmt.eprintln("USAGE: occm [-assembly] <source_file>")
-    fmt.eprintln("source_file:")
-    fmt.eprintln("  Name of the c source file to compile")
+    fmt.eprintln("USAGE: occm [-assembly] <source_files>")
+    fmt.eprintln("source_files:")
+    fmt.eprintln("  Names of the c source files to compile")
     fmt.eprintln("-assembly:")
-    fmt.eprintln("  Generate an assembly file instead of an executable")
+    fmt.eprintln("  Generate assembly files instead of an executable")
 }
 
 main :: proc() {
-    filename: string = ---
+    filenames: []string = ---
     assembly := false
-    if len(os.args) == 2 {
-        filename = os.args[1]
-    }
-    else if len(os.args) == 3 {
-        assembly = true
-        filename = os.args[2]
-    }
-    else {
+    if len(os.args) <= 1 {
         usage()
         return
     }
+    else if os.args[1] == "-assembly" {
+        if len(os.args) <= 2 {
+            usage()
+            return
+        }
+        else {
+            assembly = true
+            filenames = os.args[2:]
+        }
+    }
+    else {
+        filenames = os.args[1:]
+    }
 
-    if assembly do compile_to_assembly(filename)
-    else        do compile_from_file(filename)
+    if assembly {
+        for filename in filenames do compile_to_assembly(filename)
+    }
+    else do compile_from_files(filenames)
 }
