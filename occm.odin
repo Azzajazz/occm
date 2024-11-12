@@ -1361,33 +1361,29 @@ validate_and_gather_function_labels :: proc(function: Function_Definition_Node) 
 }
 
 get_offset :: proc(offsets: ^Scoped_Variable_Offsets, var_name: string) -> int {
-    offset, ok := offsets.offsets[var_name]
-    if ok {
-        return offset
+    offsets := offsets
+    for offsets != nil {
+        defer offsets = offsets.parent
+        
+        if offset, ok := offsets.offsets[var_name]; ok {
+            return offset
+        }
     }
-    else {
-        return get_offset(offsets.parent, var_name)
-    }
+    panic("Unreachable")
 }
 
 is_lvalue :: proc(info: ^Scoped_Validation_Info, lvalue: ^Ast_Node) -> bool {
     ident, is_ident := lvalue.variant.(Ident_Node)
-    return is_ident && is_defined_variable(info, ident.var_name)
+    if is_ident {
+        ident_found, ident_type := get_ident_type(info, ident.var_name)
+        return ident_found && ident_type == .Variable
+    }
+    else {
+        return false
+    }
 }
 
 String_Set :: map[string]struct{}
-
-Validation_Info :: struct {
-    control_flows: [dynamic]Containing_Control_Flow,
-    function_signatures: [dynamic]Function_Signature,
-    function_defs: [dynamic]string,
-}
-
-Scoped_Validation_Info :: struct {
-    parent: ^Scoped_Validation_Info,
-    variable_names: String_Set,
-    function_names: String_Set,
-}
 
 Function_Signature :: struct {
     name: string,
@@ -1395,24 +1391,57 @@ Function_Signature :: struct {
     param_types: []string,
 }
 
-is_defined_variable :: proc(scoped_info: ^Scoped_Validation_Info, var_name: string) -> bool {
-    scoped_info := scoped_info
-    for scoped_info != nil {
-        if var_name in scoped_info.variable_names do return true
-        scoped_info = scoped_info.parent
-    }
-    return false
+Validation_Info :: struct {
+    control_flows: [dynamic]Containing_Control_Flow,
+    function_signatures: [dynamic]Function_Signature,
+    function_defs: [dynamic]string,
 }
 
-is_defined_function :: proc(scoped_info: ^Scoped_Validation_Info, func_name: string) -> bool {
+Ident_Type :: enum {
+    Function,
+    Variable,
+}
+
+Scoped_Validation_Info :: struct {
+    parent: ^Scoped_Validation_Info,
+    identifiers: map[string]Ident_Type,
+}
+
+get_ident_type :: proc(scoped_info: ^Scoped_Validation_Info, name: string) -> (found: bool, type: Ident_Type) {
     scoped_info := scoped_info
     for scoped_info != nil {
-        for name in scoped_info.function_names {
-            if name == func_name do return true
+        defer scoped_info = scoped_info.parent
+
+        if type, found = scoped_info.identifiers[name]; found {
+            return true, type 
         }
-        scoped_info = scoped_info.parent
     }
-    return false
+
+    return false, nil 
+}
+
+update_identifier :: proc(scoped_info: ^Scoped_Validation_Info, name: string, type: Ident_Type) {
+    current_scoped_info := scoped_info
+    for current_scoped_info != nil {
+        defer current_scoped_info = current_scoped_info.parent
+
+        if name in current_scoped_info.identifiers {
+            current_scoped_info.identifiers[name] = type
+            return
+        }
+    }
+
+    scoped_info.identifiers[name] = type
+}
+
+is_in_same_scope_of_type :: proc(scoped_info: ^Scoped_Validation_Info, name: string, type: Ident_Type) -> bool {
+    assert(scoped_info != nil)
+    if ident_type, ident_found := scoped_info.identifiers[name]; ident_found {
+        return ident_type == type
+    }
+    else {
+        return false
+    }
 }
 
 has_conflicting_function_signature :: proc(info: ^Validation_Info, signature: Function_Signature) -> bool {
@@ -1439,14 +1468,12 @@ get_function_signature :: proc(info: ^Validation_Info, name: string) -> Function
 make_scoped_validation_info :: proc(parent: ^Scoped_Validation_Info) -> ^Scoped_Validation_Info {
     scoped_info := new(Scoped_Validation_Info)
     scoped_info.parent = parent
-    scoped_info.variable_names = make(String_Set)
-    scoped_info.function_names = make(String_Set)
+    scoped_info.identifiers = make(map[string]Ident_Type)
     return scoped_info
 }
 
 delete_scoped_validation_info :: proc(scoped_info: ^Scoped_Validation_Info) {
-    delete(scoped_info.variable_names)
-    delete(scoped_info.function_names)
+    delete(scoped_info.identifiers)
     free(scoped_info)
 }
 
@@ -1471,7 +1498,7 @@ validate_program :: proc(program: Program) {
                 }
                 signature := Function_Signature{func.name, "int", param_types}
                 if has_conflicting_function_signature(&info, signature) do semantic_error("Conflicting function types")
-                scoped_info.function_names[func.name] = {}
+                update_identifier(scoped_info, func.name, .Function)
                 append(&info.function_signatures, signature)
 
             case Function_Definition_Node:
@@ -1486,14 +1513,14 @@ validate_program :: proc(program: Program) {
                     if def == func.name do semantic_error("Duplicate definition of function with the same name")
                 }
                 if has_conflicting_function_signature(&info, signature) do semantic_error("Conflicting function types")
-                scoped_info.function_names[func.name] = {}
+                update_identifier(scoped_info, func.name, .Function)
                 append(&info.function_signatures, signature)
                 append(&info.function_defs, func.name)
 
                 new_scoped_info := make_scoped_validation_info(scoped_info)
                 defer delete_scoped_validation_info(new_scoped_info)
                 for param in func.params {
-                    new_scoped_info.variable_names[param] = {}
+                    new_scoped_info.identifiers[param] = .Variable
                 }
 
                 for block_item in func.body {
@@ -1509,25 +1536,25 @@ validate_program :: proc(program: Program) {
 validate_block_item :: proc(block_item: ^Ast_Node, info: ^Validation_Info, scoped_info: ^Scoped_Validation_Info, labels: []Label) {
     #partial switch item in block_item.variant {
         case Decl_Assign_Node:
-            if item.var_name in scoped_info.variable_names do semantic_error("Duplicate declarations of the same variable is not allowed")
-            if item.var_name in scoped_info.function_names do semantic_error("Variable names must be distinct from function names")
-            scoped_info.variable_names[item.var_name] = {}
+            if is_in_same_scope_of_type(scoped_info, item.var_name, .Variable) do semantic_error("Duplicate declarations of the same variable is not allowed")
+            if is_in_same_scope_of_type(scoped_info, item.var_name, .Function) do semantic_error("Variable names must be distinct from function names")
+            update_identifier(scoped_info, item.var_name, .Variable)
             validate_expr(item.right, info, scoped_info)
 
         case Decl_Node: // Space on the stack is already allocated by emit_function
-            if item.var_name in scoped_info.variable_names do semantic_error("Duplicate declarations of the same variable is not allowed")
-            if item.var_name in scoped_info.function_names do semantic_error("Variable names must be distinct from function names")
-            scoped_info.variable_names[item.var_name] = {}
+            if is_in_same_scope_of_type(scoped_info, item.var_name, .Variable) do semantic_error("Duplicate declarations of the same variable is not allowed")
+            if is_in_same_scope_of_type(scoped_info, item.var_name, .Function) do semantic_error("Variable names must be distinct from function names")
+            update_identifier(scoped_info, item.var_name, .Variable)
 
         case Function_Declaration_Node:
-            if item.name in scoped_info.variable_names do semantic_error("Function names must be distinct from variable names")
+            if is_in_same_scope_of_type(scoped_info, item.name, .Variable) do semantic_error("Function names must be distinct from variable names")
             param_types := make([]string, len(item.params))
             for i in 0..<len(item.params) {
                 param_types[i] = "int"
             }
             signature := Function_Signature{item.name, "int", param_types}
             if has_conflicting_function_signature(info, signature) do semantic_error("Conflicting function types")
-            scoped_info.function_names[item.name] = {}
+            update_identifier(scoped_info, item.name, .Function)
             append(&info.function_signatures, signature)
 
         case Function_Definition_Node:
@@ -1613,7 +1640,9 @@ validate_expr :: proc(expr: ^Ast_Node, info: ^Validation_Info, scoped_info: ^Sco
         case Int_Constant_Node: // Do nothing
 
         case Ident_Node:
-            if !is_defined_variable(scoped_info, e.var_name) do semantic_error("Identifier is used before it is declared")
+            if found, type := get_ident_type(scoped_info, e.var_name); !found || type != .Variable {
+                semantic_error("Variable is used before it is declared")
+            }
 
         case Negate_Node:
             validate_expr(e.expr, info, scoped_info)
@@ -1741,8 +1770,9 @@ validate_expr :: proc(expr: ^Ast_Node, info: ^Validation_Info, scoped_info: ^Sco
             validate_expr(e.if_false, info, scoped_info)
 
         case Function_Call_Node:
-            if is_defined_variable(scoped_info, e.name) do semantic_error("Cannot call a variable as a function")
-            if !is_defined_function(scoped_info, e.name) do semantic_error("Function used before it is declared")
+            found, type := get_ident_type(scoped_info, e.name)
+            if !found do semantic_error("Function used before it is declared")
+            if found && type == .Variable do semantic_error("Cannot call a variable as a function")
             signature := get_function_signature(info, e.name)
             if len(e.args) != len(signature.param_types) do semantic_error("Function called with wrong number of arguments")
             for arg in e.args {
