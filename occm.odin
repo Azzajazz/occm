@@ -1420,20 +1420,6 @@ get_ident_type :: proc(scoped_info: ^Scoped_Validation_Info, name: string) -> (f
     return false, nil 
 }
 
-update_identifier :: proc(scoped_info: ^Scoped_Validation_Info, name: string, type: Ident_Type) {
-    current_scoped_info := scoped_info
-    for current_scoped_info != nil {
-        defer current_scoped_info = current_scoped_info.parent
-
-        if name in current_scoped_info.identifiers {
-            current_scoped_info.identifiers[name] = type
-            return
-        }
-    }
-
-    scoped_info.identifiers[name] = type
-}
-
 is_in_same_scope_of_type :: proc(scoped_info: ^Scoped_Validation_Info, name: string, type: Ident_Type) -> bool {
     assert(scoped_info != nil)
     if ident_type, ident_found := scoped_info.identifiers[name]; ident_found {
@@ -1498,7 +1484,7 @@ validate_program :: proc(program: Program) {
                 }
                 signature := Function_Signature{func.name, "int", param_types}
                 if has_conflicting_function_signature(&info, signature) do semantic_error("Conflicting function types")
-                update_identifier(scoped_info, func.name, .Function)
+                scoped_info.identifiers[func.name] = .Function
                 append(&info.function_signatures, signature)
 
             case Function_Definition_Node:
@@ -1513,7 +1499,7 @@ validate_program :: proc(program: Program) {
                     if def == func.name do semantic_error("Duplicate definition of function with the same name")
                 }
                 if has_conflicting_function_signature(&info, signature) do semantic_error("Conflicting function types")
-                update_identifier(scoped_info, func.name, .Function)
+                scoped_info.identifiers[func.name] = .Function
                 append(&info.function_signatures, signature)
                 append(&info.function_defs, func.name)
 
@@ -1538,13 +1524,13 @@ validate_block_item :: proc(block_item: ^Ast_Node, info: ^Validation_Info, scope
         case Decl_Assign_Node:
             if is_in_same_scope_of_type(scoped_info, item.var_name, .Variable) do semantic_error("Duplicate declarations of the same variable is not allowed")
             if is_in_same_scope_of_type(scoped_info, item.var_name, .Function) do semantic_error("Variable names must be distinct from function names")
-            update_identifier(scoped_info, item.var_name, .Variable)
+            scoped_info.identifiers[item.var_name] = .Variable
             validate_expr(item.right, info, scoped_info)
 
         case Decl_Node: // Space on the stack is already allocated by emit_function
             if is_in_same_scope_of_type(scoped_info, item.var_name, .Variable) do semantic_error("Duplicate declarations of the same variable is not allowed")
             if is_in_same_scope_of_type(scoped_info, item.var_name, .Function) do semantic_error("Variable names must be distinct from function names")
-            update_identifier(scoped_info, item.var_name, .Variable)
+            scoped_info.identifiers[item.var_name] = .Variable
 
         case Function_Declaration_Node:
             if is_in_same_scope_of_type(scoped_info, item.name, .Variable) do semantic_error("Function names must be distinct from variable names")
@@ -1554,7 +1540,7 @@ validate_block_item :: proc(block_item: ^Ast_Node, info: ^Validation_Info, scope
             }
             signature := Function_Signature{item.name, "int", param_types}
             if has_conflicting_function_signature(info, signature) do semantic_error("Conflicting function types")
-            update_identifier(scoped_info, item.name, .Function)
+            scoped_info.identifiers[item.name] = .Function
             append(&info.function_signatures, signature)
 
         case Function_Definition_Node:
