@@ -2633,11 +2633,15 @@ compile_from_files :: proc(source_files: []string) -> (exec_file: string) {
     out_file := fmt.aprintf("%v.exe", file_base)
 
     asm_files: [dynamic]string
+    to_delete: [dynamic]string
     defer delete(asm_files)
 
     for file in source_files {
         asm_file := compile_to_assembly(file)
         append(&asm_files, asm_file)
+        if asm_file != file {
+            append(&to_delete, asm_file)
+        }
 
         when LOG {
             fmt.printfln("Compiling %v to assembly...", asm_file)
@@ -2649,7 +2653,7 @@ compile_from_files :: proc(source_files: []string) -> (exec_file: string) {
     when LOG {
         fmt.println("Deleting asm files...")
     }
-    for asm_file in asm_files do os.remove(asm_file)
+    for file in to_delete do os.remove(file)
 
     return out_file
 }
