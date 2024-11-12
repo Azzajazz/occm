@@ -1592,9 +1592,11 @@ validate_statement :: proc(statement: ^Ast_Node, info: ^Validation_Info, scoped_
             pop(&info.control_flows)
 
         case Continue_Node:
-            if len(info.control_flows) == 0 || slice.last(info.control_flows[:]) != .Loop {
-                semantic_error("'continue' statements must be inside a loop")
+            out_of_loop := true
+            for control in info.control_flows {
+                if control == .Loop do out_of_loop = false
             }
+            if out_of_loop do semantic_error("'continue' statements must be inside a loop")
 
         case Break_Node:
             if len(info.control_flows) == 0 do semantic_error("'break' statements must be inside a 'switch' or a loop")
@@ -2647,7 +2649,6 @@ compile_from_files :: proc(source_files: []string) -> (exec_file: string) {
             fmt.printfln("Compiling %v to assembly...", asm_file)
         }
     }
-
     compile_with_gcc(asm_files[:], out_file)
     
     when LOG {
