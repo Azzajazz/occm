@@ -2589,6 +2589,9 @@ emit :: proc(program: Program) -> string {
 }
 
 compile_to_assembly :: proc(source_file: string) -> (asm_file: string) {
+    // No need to compile assembly files
+    if path.ext(source_file) == ".s" do return source_file
+
     file_base := path.stem(path.base(source_file))
     asm_file = fmt.aprintf("%v.s", file_base)
 
