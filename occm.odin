@@ -1379,12 +1379,13 @@ String_Set :: map[string]struct{}
 
 Validation_Info :: struct {
     control_flows: [dynamic]Containing_Control_Flow,
+    function_signatures: [dynamic]Function_Signature,
 }
 
 Scoped_Validation_Info :: struct {
     parent: ^Scoped_Validation_Info,
-    function_signatures: [dynamic]Function_Signature,
     variable_names: String_Set,
+    function_names: String_Set,
 }
 
 Function_Signature :: struct {
@@ -1405,56 +1406,46 @@ is_defined_variable :: proc(scoped_info: ^Scoped_Validation_Info, var_name: stri
 is_defined_function :: proc(scoped_info: ^Scoped_Validation_Info, func_name: string) -> bool {
     scoped_info := scoped_info
     for scoped_info != nil {
-        for signature in scoped_info.function_signatures {
-            if signature.name == func_name do return true
+        for name in scoped_info.function_names {
+            if name == func_name do return true
         }
         scoped_info = scoped_info.parent
     }
     return false
 }
 
-has_conflicting_function_signature :: proc(scoped_info: ^Scoped_Validation_Info, signature: Function_Signature) -> bool {
-    scoped_info := scoped_info
-    for scoped_info != nil {
-        for sig in scoped_info.function_signatures {
-            if sig.name == signature.name {
-                if sig.return_type != signature.return_type do return true
-                if len(signature.param_types) != len(sig.param_types) do return true
-                for i in 0..<len(signature.param_types) {
-                    if signature.param_types[i] != sig.param_types[i] do return true
-                }
+has_conflicting_function_signature :: proc(info: ^Validation_Info, signature: Function_Signature) -> bool {
+    for sig in info.function_signatures {
+        if sig.name == signature.name {
+            if sig.return_type != signature.return_type do return true
+            if len(signature.param_types) != len(sig.param_types) do return true
+            for i in 0..<len(signature.param_types) {
+                if signature.param_types[i] != sig.param_types[i] do return true
             }
         }
-        scoped_info = scoped_info.parent
     }
     return false
 }
 
-get_function_signature :: proc(scoped_info: ^Scoped_Validation_Info, name: string) -> Function_Signature {
-    scoped_info := scoped_info
-    for scoped_info != nil {
-        for sig in scoped_info.function_signatures {
-            if sig.name == name do return sig
-        }
-        scoped_info = scoped_info.parent
+get_function_signature :: proc(info: ^Validation_Info, name: string) -> Function_Signature {
+    for sig in info.function_signatures {
+        if sig.name == name do return sig
     }
+
     return Function_Signature{}
 }
 
 make_scoped_validation_info :: proc(parent: ^Scoped_Validation_Info) -> ^Scoped_Validation_Info {
     scoped_info := new(Scoped_Validation_Info)
     scoped_info.parent = parent
-    scoped_info.function_signatures = make([dynamic]Function_Signature)
     scoped_info.variable_names = make(String_Set)
+    scoped_info.function_names = make(String_Set)
     return scoped_info
 }
 
 delete_scoped_validation_info :: proc(scoped_info: ^Scoped_Validation_Info) {
-    for signature in scoped_info.function_signatures {
-        delete(signature.param_types)
-    }
-    delete(scoped_info.function_signatures)
     delete(scoped_info.variable_names)
+    delete(scoped_info.function_names)
     free(scoped_info)
 }
 
@@ -1462,7 +1453,7 @@ validate_program :: proc(program: Program) {
     scoped_info := make_scoped_validation_info(nil)
     defer delete_scoped_validation_info(scoped_info)
     
-    info := Validation_Info{make([dynamic]Containing_Control_Flow)}
+    info := Validation_Info{make([dynamic]Containing_Control_Flow), make([dynamic]Function_Signature)}
     defer delete(info.control_flows)
 
     for function in program.children {
@@ -1474,8 +1465,9 @@ validate_program :: proc(program: Program) {
                     param_types[i] = "int"
                 }
                 signature := Function_Signature{func.name, "int", param_types}
-                if has_conflicting_function_signature(scoped_info, signature) do semantic_error("Conflicting function types")
-                append(&scoped_info.function_signatures, signature)
+                if has_conflicting_function_signature(&info, signature) do semantic_error("Conflicting function types")
+                scoped_info.function_names[func.name] = {}
+                append(&info.function_signatures, signature)
 
             case Function_Definition_Node:
                 if contains_duplicate(func.params[:]) do semantic_error("Duplicate function parameters not allowed")
@@ -1485,8 +1477,9 @@ validate_program :: proc(program: Program) {
                     param_types[i] = "int"
                 }
                 signature := Function_Signature{func.name, "int", param_types}
-                if has_conflicting_function_signature(scoped_info, signature) do semantic_error("Conflicting function types")
-                append(&scoped_info.function_signatures, signature)
+                if has_conflicting_function_signature(&info, signature) do semantic_error("Conflicting function types")
+                scoped_info.function_names[func.name] = {}
+                append(&info.function_signatures, signature)
 
                 new_scoped_info := make_scoped_validation_info(scoped_info)
                 defer delete_scoped_validation_info(new_scoped_info)
@@ -1524,8 +1517,9 @@ validate_block_item :: proc(block_item: ^Ast_Node, info: ^Validation_Info, scope
                 param_types[i] = "int"
             }
             signature := Function_Signature{item.name, "int", param_types}
-            if has_conflicting_function_signature(scoped_info, signature) do semantic_error("Conflicting function types")
-            append(&scoped_info.function_signatures, signature)
+            if has_conflicting_function_signature(info, signature) do semantic_error("Conflicting function types")
+            scoped_info.function_names[item.name] = {}
+            append(&info.function_signatures, signature)
 
         case Function_Definition_Node:
             semantic_error("Function definitions cannot be nested in scopes")
@@ -1739,7 +1733,7 @@ validate_expr :: proc(expr: ^Ast_Node, info: ^Validation_Info, scoped_info: ^Sco
 
         case Function_Call_Node:
             if !is_defined_function(scoped_info, e.name) do semantic_error("Function used before it is declared")
-            signature := get_function_signature(scoped_info, e.name)
+            signature := get_function_signature(info, e.name)
             if len(e.args) != len(signature.param_types) do semantic_error("Function called with wrong number of arguments")
             for arg in e.args {
                 validate_expr(arg, info, scoped_info)
