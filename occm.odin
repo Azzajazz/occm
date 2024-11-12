@@ -1510,13 +1510,13 @@ validate_block_item :: proc(block_item: ^Ast_Node, info: ^Validation_Info, scope
     #partial switch item in block_item.variant {
         case Decl_Assign_Node:
             if item.var_name in scoped_info.variable_names do semantic_error("Duplicate declarations of the same variable is not allowed")
-            if is_defined_function(scoped_info, item.var_name) do semantic_error("Variable names must be distinct from function names")
+            if item.var_name in scoped_info.function_names do semantic_error("Variable names must be distinct from function names")
             scoped_info.variable_names[item.var_name] = {}
             validate_expr(item.right, info, scoped_info)
 
         case Decl_Node: // Space on the stack is already allocated by emit_function
             if item.var_name in scoped_info.variable_names do semantic_error("Duplicate declarations of the same variable is not allowed")
-            if is_defined_function(scoped_info, item.var_name) do semantic_error("Variable names must be distinct from function names")
+            if item.var_name in scoped_info.function_names do semantic_error("Variable names must be distinct from function names")
             scoped_info.variable_names[item.var_name] = {}
 
         case Function_Declaration_Node:
@@ -1741,6 +1741,7 @@ validate_expr :: proc(expr: ^Ast_Node, info: ^Validation_Info, scoped_info: ^Sco
             validate_expr(e.if_false, info, scoped_info)
 
         case Function_Call_Node:
+            if is_defined_variable(scoped_info, e.name) do semantic_error("Cannot call a variable as a function")
             if !is_defined_function(scoped_info, e.name) do semantic_error("Function used before it is declared")
             signature := get_function_signature(info, e.name)
             if len(e.args) != len(signature.param_types) do semantic_error("Function called with wrong number of arguments")

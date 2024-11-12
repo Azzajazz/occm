@@ -1,3 +1,3 @@
 exit_code: 1
 stdout: b''
-stderr: b'Semantic error! Variable names must be distinct from function names\n'
+stderr: b'Semantic error! Cannot call a variable as a function\n'
