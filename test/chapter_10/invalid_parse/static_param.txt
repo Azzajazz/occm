@@ -1,0 +1,3 @@
+exit_code: 1
+stdout: b'    2  | int f(static int i) {\n                      ^^^\n'
+stderr: b'chapter_10\\invalid_parse\\static_param.c(2:17) Parse error! Expected a semicolon or block item list after function title.\n'

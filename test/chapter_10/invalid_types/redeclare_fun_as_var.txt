@@ -1,0 +1,3 @@
+exit_code: 1
+stdout: b'    12  |     extern int foo;\n                     ^^^\n'
+stderr: b'chapter_10\\invalid_types\\redeclare_fun_as_var.c(12:15) Parse error! Expected a semicolon after expression statement.\n'

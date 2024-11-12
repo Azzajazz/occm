@@ -1,0 +1,3 @@
+exit_code: 1
+stdout: b'    4  | static var = 0;\n         ^^^^^^\n'
+stderr: b"chapter_10\\invalid_parse\\missing_type_specifier.c(4:7) Parse error! Expected 'int' as start of function title.\n"

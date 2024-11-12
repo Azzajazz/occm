@@ -1,0 +1,3 @@
+exit_code: 1
+stdout: b'    2  | static int foo;\n         ^^^^^^\n'
+stderr: b"chapter_10\\invalid_types\\conflicting_variable_linkage.c(2:7) Parse error! Expected 'int' as start of function title.\n"

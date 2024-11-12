@@ -1,0 +1,3 @@
+exit_code: 1
+stdout: b'    10  |         extern int x;\n                         ^^^\n'
+stderr: b'chapter_10\\invalid_types\\conflicting_variable_linkage_2.c(10:19) Parse error! Expected a semicolon after expression statement.\n'

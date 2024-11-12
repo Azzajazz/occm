@@ -1,0 +1,3 @@
+exit_code: 1
+stdout: b'    6  |     switch (x << 2l) {  // x << 2 == 400\n                           ^\n'
+stderr: b'chapter_11\\invalid_labels\\extra_credit\\bitshift_duplicate_cases.c(6:19) Lex error! Unexpected character l\n'

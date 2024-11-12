@@ -1,0 +1,3 @@
+exit_code: 1
+stdout: b'    4  |     static int i = 0;\n                    ^^^\n'
+stderr: b'chapter_10\\invalid_types\\extra_credit\\static_var_case.c(4:15) Parse error! Expected a semicolon after expression statement.\n'

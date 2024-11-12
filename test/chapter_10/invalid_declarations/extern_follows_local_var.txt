@@ -1,0 +1,3 @@
+exit_code: 1
+stdout: b'    9  |     extern int x;\n                    ^^^\n'
+stderr: b'chapter_10\\invalid_declarations\\extern_follows_local_var.c(9:15) Parse error! Expected a semicolon after expression statement.\n'

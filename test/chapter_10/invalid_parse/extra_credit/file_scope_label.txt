@@ -1,0 +1,3 @@
+exit_code: 1
+stdout: b'    2  | x:\n         ^\n'
+stderr: b"chapter_10\\invalid_parse\\extra_credit\\file_scope_label.c(2:2) Parse error! Expected 'int' as start of function title.\n"

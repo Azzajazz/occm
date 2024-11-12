@@ -1,0 +1,3 @@
+exit_code: 1
+stdout: b'    2  | int f {\n               ^\n'
+stderr: b'chapter_10\\invalid_parse\\missing_parameter_list.c(2:8) Parse error! Expected parameters in function title.\n'

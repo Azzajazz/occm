@@ -1,0 +1,3 @@
+exit_code: 1
+stdout: b'    6  |     static int b = a * 2;\n                    ^^^\n'
+stderr: b'chapter_10\\invalid_types\\non_constant_static_local_initializer.c(6:15) Parse error! Expected a semicolon after expression statement.\n'

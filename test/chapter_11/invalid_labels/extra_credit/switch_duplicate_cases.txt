@@ -1,0 +1,3 @@
+exit_code: 0
+stdout: b''
+stderr: b'switch_duplicate_cases.s: Assembler messages:\r\nswitch_duplicate_cases.s:10: Warning: 0000000400000000 shortened to 0000000000000000\r\n'

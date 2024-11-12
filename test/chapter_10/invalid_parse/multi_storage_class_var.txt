@@ -1,0 +1,3 @@
+exit_code: 1
+stdout: b'    3  |     static extern foo = 0;\n                    ^^^^^^\n'
+stderr: b'chapter_10\\invalid_parse\\multi_storage_class_var.c(3:18) Parse error! Expected a semicolon after expression statement.\n'
