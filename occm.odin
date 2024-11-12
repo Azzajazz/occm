@@ -1380,6 +1380,7 @@ String_Set :: map[string]struct{}
 Validation_Info :: struct {
     control_flows: [dynamic]Containing_Control_Flow,
     function_signatures: [dynamic]Function_Signature,
+    function_defs: [dynamic]string,
 }
 
 Scoped_Validation_Info :: struct {
@@ -1453,7 +1454,11 @@ validate_program :: proc(program: Program) {
     scoped_info := make_scoped_validation_info(nil)
     defer delete_scoped_validation_info(scoped_info)
     
-    info := Validation_Info{make([dynamic]Containing_Control_Flow), make([dynamic]Function_Signature)}
+    info := Validation_Info{
+        make([dynamic]Containing_Control_Flow),
+        make([dynamic]Function_Signature),
+        make([dynamic]string),
+    }
     defer delete(info.control_flows)
 
     for function in program.children {
@@ -1477,12 +1482,13 @@ validate_program :: proc(program: Program) {
                     param_types[i] = "int"
                 }
                 signature := Function_Signature{func.name, "int", param_types}
-                for sig in info.function_signatures {
-                    if sig.name == func.name do semantic_error("Duplicate definition of function with the same name")
+                for def in info.function_defs {
+                    if def == func.name do semantic_error("Duplicate definition of function with the same name")
                 }
                 if has_conflicting_function_signature(&info, signature) do semantic_error("Conflicting function types")
                 scoped_info.function_names[func.name] = {}
                 append(&info.function_signatures, signature)
+                append(&info.function_defs, func.name)
 
                 new_scoped_info := make_scoped_validation_info(scoped_info)
                 defer delete_scoped_validation_info(new_scoped_info)
