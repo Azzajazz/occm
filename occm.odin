@@ -1477,6 +1477,9 @@ validate_program :: proc(program: Program) {
                     param_types[i] = "int"
                 }
                 signature := Function_Signature{func.name, "int", param_types}
+                for sig in info.function_signatures {
+                    if sig.name == func.name do semantic_error("Duplicate definition of function with the same name")
+                }
                 if has_conflicting_function_signature(&info, signature) do semantic_error("Conflicting function types")
                 scoped_info.function_names[func.name] = {}
                 append(&info.function_signatures, signature)
