@@ -639,8 +639,16 @@ parse_program :: proc(parser: ^Parser) -> Program {
     for {
         next_token := look_ahead(&parser.lexer, 1)
         if next_token.type == .EndOfFile do break
-        function := parse_function_definition_or_declaration(parser)
-        append(&children, function)
+
+        next_token = look_ahead(&parser.lexer, 3)
+        if next_token.type == .LParen {
+            function := parse_function_definition_or_declaration(parser)
+            append(&children, function)
+        }
+        else {
+            decl := parse_variable_decl_or_decl_assign(parser)
+            append(&children, decl)
+        }
     }
 
     return Program{children}
