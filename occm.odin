@@ -733,35 +733,42 @@ parse_block_item :: proc(parser: ^Parser) -> ^Ast_Node {
             token_1 := look_ahead(&parser.lexer, 2)
             token_2 := look_ahead(&parser.lexer, 3)
             if token_1.type != .Ident do parse_error(parser, "Expected an identifier after type.", span_token(token_1))
-            var_name := token_1.text
 
-            if token_2.type == .Semicolon {
-                take_token(&parser.lexer)
-                take_token(&parser.lexer)
-                take_token(&parser.lexer)
-                return make_node_1(Decl_Node, var_name)
-            }
-            else if token_2.type == .Equal {
-                take_token(&parser.lexer)
-                take_token(&parser.lexer)
-                take_token(&parser.lexer)
-                right := parse_expression(parser)
-                statement := make_node_2(Decl_Assign_Node, var_name, right)
-                token := take_token(&parser.lexer)
-                if token.type != .Semicolon do parse_error(parser, "Expected a semicolon after statement.", span_token(token))
-                return statement
-            }
-            else if token_2.type == .LParen {
+            if token_2.type == .LParen {
                 return parse_function_definition_or_declaration(parser)
             }
             else {
-                parse_error(parser, "Expected a function or variable declaration.", span_token(token))
+                return parse_variable_decl_or_decl_assign(parser)
             }
 
         case:
             return parse_statement(parser, labels)
     }
     
+    panic("Unreachable")
+}
+
+parse_variable_decl_or_decl_assign :: proc(parser: ^Parser) -> ^Ast_Node {
+    token := take_token(&parser.lexer)
+    if token.type != .IntKeyword do parse_error(parser, "Variable declarations must begin with a type", span_token(token))
+    token = take_token(&parser.lexer)
+    if token.type != .Ident do parse_error(parser, "Expected variable name", span_token(token))
+    var_name := token.text
+    token = take_token(&parser.lexer)
+    if token.type == .Semicolon {
+        return make_node_1(Decl_Node, var_name)
+    }
+    else if token.type == .Equal {
+        right := parse_expression(parser)
+        statement := make_node_2(Decl_Assign_Node, var_name, right)
+        token := take_token(&parser.lexer)
+        if token.type != .Semicolon do parse_error(parser, "Expected a semicolon after statement.", span_token(token))
+        return statement
+    }
+    else {
+        parse_error(parser, "Illegal token in variable declaration", span_token(token))
+    }
+
     panic("Unreachable")
 }
 
