@@ -159,13 +159,20 @@ Goto_Node :: struct {
     label: string
 }
 
+Storage_Specifier :: enum {
+    Static,
+    Extern,
+}
+
 Decl_Assign_Node :: struct {
     var_name: string,
     right: ^Ast_Node,
+    storage_specifiers: bit_set[Storage_Specifier],
 }
 
 Decl_Node :: struct {
-    var_name: string 
+    var_name: string,
+    storage_specifiers: bit_set[Storage_Specifier],
 }
 
 Compound_Statement_Node :: struct {

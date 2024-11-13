@@ -67,6 +67,8 @@ Token_Type :: enum {
     SwitchKeyword,
     CaseKeyword,
     DefaultKeyword,
+    ExternKeyword,
+    StaticKeyword,
     Ident,
     IntConstant,
     Semicolon,
@@ -312,6 +314,12 @@ consume_keyword_or_ident_token :: proc(lexer: ^Lexer) {
 
         case text == "default":
             token = construct_token(lexer, .DefaultKeyword, len("default"))
+
+        case text == "static":
+            token = construct_token(lexer, .StaticKeyword, len("static"))
+
+        case text == "extern":
+            token = construct_token(lexer, .ExternKeyword, len("extern"))
 
         case:
             token = construct_token(lexer, .Ident, len(text))
@@ -756,19 +764,35 @@ parse_block_item :: proc(parser: ^Parser) -> ^Ast_Node {
     panic("Unreachable")
 }
 
+matches_storage_specifier :: proc(token: Token) -> bool {
+    return token.type == .StaticKeyword || token.type == .ExternKeyword
+}
+
 parse_variable_decl_or_decl_assign :: proc(parser: ^Parser) -> ^Ast_Node {
     token := take_token(&parser.lexer)
+    storage_specifiers: bit_set[Storage_Specifier]
+    for matches_storage_specifier(token) {
+        defer token = take_token(&parser.lexer)
+
+        #partial switch token.type {
+            case .StaticKeyword:
+                storage_specifiers |= {.Static}
+
+            case .ExternKeyword:
+                storage_specifiers |= {.Extern}
+        }
+    }
     if token.type != .IntKeyword do parse_error(parser, "Variable declarations must begin with a type", span_token(token))
     token = take_token(&parser.lexer)
     if token.type != .Ident do parse_error(parser, "Expected variable name", span_token(token))
     var_name := token.text
     token = take_token(&parser.lexer)
     if token.type == .Semicolon {
-        return make_node_1(Decl_Node, var_name)
+        return make_node_2(Decl_Node, var_name, storage_specifiers)
     }
     else if token.type == .Equal {
         right := parse_expression(parser)
-        statement := make_node_2(Decl_Assign_Node, var_name, right)
+        statement := make_node_3(Decl_Assign_Node, var_name, right, storage_specifiers)
         token := take_token(&parser.lexer)
         if token.type != .Semicolon do parse_error(parser, "Expected a semicolon after statement.", span_token(token))
         return statement
@@ -1270,14 +1294,14 @@ parse_for_precondition :: proc(parser: ^Parser) -> ^Ast_Node {
             take_token(&parser.lexer)
             take_token(&parser.lexer)
             take_token(&parser.lexer)
-            statement = make_node_1(Decl_Node, var_name)
+            statement = make_node_2(Decl_Node, var_name, bit_set[Storage_Specifier]{})
         }
         else if token_2.type == .Equal {
             take_token(&parser.lexer)
             take_token(&parser.lexer)
             take_token(&parser.lexer)
             right := parse_expression(parser)
-            statement = make_node_2(Decl_Assign_Node, var_name, right)
+            statement = make_node_3(Decl_Assign_Node, var_name, right, bit_set[Storage_Specifier]{})
         }
         else {
             parse_error(parser, "Invalid 'for' loop precondition.", span_token(token)) //@TODO: Should this span the entire precondition?
