@@ -300,6 +300,7 @@ pretty_print_program :: proc(program: Program) {
         fmt.println("program(")
         for child in program.children {
             pretty_print_node(child^, 1)
+            fmt.println(",")
         }
         fmt.println(")")
     }
