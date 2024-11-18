@@ -670,10 +670,10 @@ parse_definition_or_declaration :: proc(parser: ^Parser) -> ^Ast_Node {
         if matches_storage_specifier(token.type) {
             #partial switch token.type {
                 case .StaticKeyword:
-                    storage_specifiers |= {.Static}
+                    storage_specifiers |= {.Internal}
 
                 case .ExternKeyword:
-                    storage_specifiers |= {.Extern}
+                    storage_specifiers |= {.External}
             }
         }
         else {

@@ -162,8 +162,8 @@ Goto_Node :: struct {
 }
 
 Storage_Specifier :: enum {
-    Static,
-    Extern,
+    Internal,
+    External,
 }
 
 Decl_Assign_Node :: struct {
