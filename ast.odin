@@ -81,11 +81,13 @@ Ast_Node :: struct {
 }
 
 Function_Declaration_Node :: struct {
+    storage_specifiers: bit_set[Storage_Specifier],
     name: string,
     params: [dynamic]string,
 }
 
 Function_Definition_Node :: struct {
+    storage_specifiers: bit_set[Storage_Specifier],
     name: string,
     params: [dynamic]string,
     body: [dynamic]^Ast_Node,
@@ -165,14 +167,14 @@ Storage_Specifier :: enum {
 }
 
 Decl_Assign_Node :: struct {
+    storage_specifiers: bit_set[Storage_Specifier],
     var_name: string,
     right: ^Ast_Node,
-    storage_specifiers: bit_set[Storage_Specifier],
 }
 
 Decl_Node :: struct {
-    var_name: string,
     storage_specifiers: bit_set[Storage_Specifier],
+    var_name: string,
 }
 
 Compound_Statement_Node :: struct {
