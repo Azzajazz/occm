@@ -633,6 +633,10 @@ Parser :: struct {
     lexer: Lexer,
 }
 
+matches_storage_specifier :: proc(type: Token_Type) -> bool {
+    return type == .StaticKeyword || type == .ExternKeyword
+}
+
 parse_error :: proc(parser: ^Parser, message: string, span: Span = {}) {
     fmt.eprintfln("%v(%v:%v) Parse error! %v", parser.lexer.file, parser.lexer.line + 1, parser.lexer.char + 1, message)
     if span != {} {
@@ -645,83 +649,112 @@ parse_program :: proc(parser: ^Parser) -> Program {
     children := make([dynamic]^Ast_Node)
 
     for {
-        next_token := look_ahead(&parser.lexer, 1)
-        if next_token.type == .EndOfFile do break
-
-        next_token = look_ahead(&parser.lexer, 3)
-        if next_token.type == .LParen {
-            function := parse_function_definition_or_declaration(parser)
-            append(&children, function)
-        }
-        else {
-            decl := parse_variable_decl_or_decl_assign(parser)
-            append(&children, decl)
-        }
+        token := look_ahead(&parser.lexer, 1)
+        if token.type == .EndOfFile do break
+        
+        child := parse_definition_or_declaration(parser)
+        append(&children, child)
     }
 
     return Program{children}
 }
 
-parse_function_definition_or_declaration :: proc(parser: ^Parser) -> ^Ast_Node {
-    title := parse_function_title(parser)
-
+parse_definition_or_declaration :: proc(parser: ^Parser) -> ^Ast_Node {
     token := take_token(&parser.lexer)
-    if token.type == .Semicolon {
-        return make_node_2(Function_Declaration_Node, title.name, title.params)
-    }
 
-    if token.type != .LBrace do parse_error(parser, "Expected a semicolon or block item list after function title.", span_token(token))
-    body := parse_block_item_list(parser)
-    return make_node_3(Function_Definition_Node, title.name, title.params, body)
-}
+    storage_specifiers: bit_set[Storage_Specifier]
+    has_type := false
+    for matches_storage_specifier(token.type) || token.type == .IntKeyword {
+        defer token = take_token(&parser.lexer)
 
-Function_Title :: struct {
-    name: string,
-    params: [dynamic]string,
-}
+        if matches_storage_specifier(token.type) {
+            #partial switch token.type {
+                case .StaticKeyword:
+                    storage_specifiers |= {.Static}
 
-parse_function_title :: proc(parser: ^Parser) -> Function_Title {
-    token := take_token(&parser.lexer)
-    if token.type != .IntKeyword do parse_error(parser, "Expected 'int' as start of function title.", span_token(token))
-
-    token = take_token(&parser.lexer)
-    if token.type != .Ident do parse_error(parser, "Expected an identifier in function title.", span_token(token))
-    name := token.text
-
-    token = take_token(&parser.lexer)
-    if token.type != .LParen do parse_error(parser, "Expected parameters in function title.", span_token(token))
-
-    params := make([dynamic]string)
-    token = take_token(&parser.lexer)
-    if token.type == .IntKeyword {
-        token = take_token(&parser.lexer)
-        if token.type != .Ident do parse_error(parser, "Expected an identifier after parameter type.", span_token(token))
-        append(&params, token.text)
-        for {
-            token = take_token(&parser.lexer)
-            if token.type == .RParen do break
-
-            if token.type != .Comma do parse_error(parser, "Expected a comma separating function parameters.", span_token(token))
-            token = take_token(&parser.lexer)
-            if token.type != .IntKeyword do parse_error(parser, "Expected a type preceding function parameter.", span_token(token))
-            token = take_token(&parser.lexer)
-            if token.type != .Ident do parse_error(parser, "Expected an identifier after parameter type.", span_token(token))
-            append(&params, token.text)
+                case .ExternKeyword:
+                    storage_specifiers |= {.Extern}
+            }
+        }
+        else {
+            if has_type do parse_error(parser, "Declarations and definitions may only have one type", span_token(token))
+            has_type = true
         }
     }
-    else if token.type == .VoidKeyword {
-        token = take_token(&parser.lexer)
-        if token.type != .RParen do parse_error(parser, "If titles contain 'void', they must not contain any other parameters.", span_token(token))
+
+    if !has_type do parse_error(parser, "Expected a type", span_token(token))
+
+    if token.type != .Ident do parse_error(parser, "Expected an identifier", span_token(token))
+    name := token.text
+    token = take_token(&parser.lexer)
+    #partial switch token.type {
+        case .Semicolon:
+            return make_node_2(Decl_Node, storage_specifiers, name)
+
+        case .Equal:
+            right := parse_expression(parser)
+            token = take_token(&parser.lexer)
+            if token.type != .Semicolon do parse_error(parser, "Expected a semicolon after variable declaration", span_token(token))
+            return make_node_3(Decl_Assign_Node, storage_specifiers, name, right)
+
+        case .LParen:
+            params := parse_function_params(parser)
+            token = take_token(&parser.lexer)
+            #partial switch token.type {
+                case .Semicolon:
+                    return make_node_3(Function_Declaration_Node, storage_specifiers, name, params)
+
+                case .LBrace:
+                    body := parse_block_item_list(parser)
+                    return make_node_4(Function_Definition_Node, storage_specifiers, name, params, body)
+
+                case:
+                    parse_error(parser, "Expected a ';' or '{'", span_token(token))
+            }
+
+        case:
+            parse_error(parser, "Expected a '(' or ';'", span_token(token))
     }
 
-    return Function_Title{name, params}
+    unreachable()
+}
+
+parse_function_params :: proc(parser: ^Parser) -> [dynamic]string {
+    params := make([dynamic]string)
+    token := look_ahead(&parser.lexer, 1)
+    if token.type == .RParen {
+        take_token(&parser.lexer)
+        return params
+    }
+    else if token.type == .VoidKeyword {
+        take_token(&parser.lexer)
+        token = take_token(&parser.lexer)
+        if token.type != .RParen do parse_error(parser, "Declarations with a 'void' parameter must have no other parameters", span_token(token))
+        return params
+    }
+
+    for {
+        token = take_token(&parser.lexer)
+        if token.type != .IntKeyword do parse_error(parser, "Expected a type in function parameter", span_token(token))
+        token = take_token(&parser.lexer)
+        if token.type != .Ident do parse_error(parser, "Expected an identifier in function parameter", span_token(token))
+        append(&params, token.text)
+        token = take_token(&parser.lexer)
+        if token.type == .RParen do break
+        if token.type != .Comma do parse_error(parser, "Expected a ',' separating function parameters", span_token(token))
+    }
+
+    return params
 }
 
 parse_block_item_list :: proc(parser: ^Parser) -> [dynamic]^Ast_Node {
-    list := make([dynamic]^Ast_Node)
+    statements := make([dynamic]^Ast_Node)
     for {
         token := look_ahead(&parser.lexer, 1)
-        if token.type == .RBrace do break
+        if token.type == .RBrace {
+            take_token(&parser.lexer)
+            break
+        }
 
         // Skip null statements
         if token.type == .Semicolon {
@@ -730,78 +763,31 @@ parse_block_item_list :: proc(parser: ^Parser) -> [dynamic]^Ast_Node {
         }
 
         block_item := parse_block_item(parser)
-        append(&list, block_item)
+        append(&statements, block_item)
     }
-
-    token := take_token(&parser.lexer)
-    if token.type != .RBrace do parse_error(parser, "Expected a '}' after block item list.", span_token(token))
-    return list
+    return statements
 }
 
 parse_block_item :: proc(parser: ^Parser) -> ^Ast_Node {
     labels := parse_labels(parser)
-
     token := look_ahead(&parser.lexer, 1)
 
-    #partial switch token.type {
-        case .IntKeyword:
-            if len(labels) > 0 do parse_error(parser, "Declarations cannot have labels.") //@TODO: What do we span here?
-            token_1 := look_ahead(&parser.lexer, 2)
-            token_2 := look_ahead(&parser.lexer, 3)
-            if token_1.type != .Ident do parse_error(parser, "Expected an identifier after type.", span_token(token_1))
-
-            if token_2.type == .LParen {
-                return parse_function_definition_or_declaration(parser)
+    switch {
+        case matches_storage_specifier(token.type) || token.type == Token_Type.IntKeyword:
+            item := parse_definition_or_declaration(parser)
+            #partial switch _ in item.variant {
+                case Decl_Node, Decl_Assign_Node, Function_Declaration_Node, Function_Definition_Node:
+                    if len(labels) > 0 {
+                        parse_error(parser, "Variable declarations, function declarations and function definitions cannot have labels.") //@TODO: What do we span here?
+                    }
             }
-            else {
-                return parse_variable_decl_or_decl_assign(parser)
-            }
+            return item
 
         case:
             return parse_statement(parser, labels)
     }
     
-    panic("Unreachable")
-}
-
-matches_storage_specifier :: proc(token: Token) -> bool {
-    return token.type == .StaticKeyword || token.type == .ExternKeyword
-}
-
-parse_variable_decl_or_decl_assign :: proc(parser: ^Parser) -> ^Ast_Node {
-    token := take_token(&parser.lexer)
-    storage_specifiers: bit_set[Storage_Specifier]
-    for matches_storage_specifier(token) {
-        defer token = take_token(&parser.lexer)
-
-        #partial switch token.type {
-            case .StaticKeyword:
-                storage_specifiers |= {.Static}
-
-            case .ExternKeyword:
-                storage_specifiers |= {.Extern}
-        }
-    }
-    if token.type != .IntKeyword do parse_error(parser, "Variable declarations must begin with a type", span_token(token))
-    token = take_token(&parser.lexer)
-    if token.type != .Ident do parse_error(parser, "Expected variable name", span_token(token))
-    var_name := token.text
-    token = take_token(&parser.lexer)
-    if token.type == .Semicolon {
-        return make_node_2(Decl_Node, var_name, storage_specifiers)
-    }
-    else if token.type == .Equal {
-        right := parse_expression(parser)
-        statement := make_node_3(Decl_Assign_Node, var_name, right, storage_specifiers)
-        token := take_token(&parser.lexer)
-        if token.type != .Semicolon do parse_error(parser, "Expected a semicolon after statement.", span_token(token))
-        return statement
-    }
-    else {
-        parse_error(parser, "Illegal token in variable declaration", span_token(token))
-    }
-
-    panic("Unreachable")
+    unreachable()
 }
 
 parse_labels :: proc(parser: ^Parser) -> [dynamic]Label {
@@ -839,6 +825,145 @@ parse_labels :: proc(parser: ^Parser) -> [dynamic]Label {
     }
 
     return labels
+}
+
+parse_statement :: proc(parser: ^Parser, labels: [dynamic]Label = nil) -> ^Ast_Node {
+    labels := labels
+    if labels == nil {
+        labels = parse_labels(parser)
+    }
+
+    result: ^Ast_Node = ---
+    token := look_ahead(&parser.lexer, 1)
+
+    #partial switch token.type {
+        case .ReturnKeyword:
+            take_token(&parser.lexer)
+            expr := parse_expression(parser)
+            result = make_node_1(Return_Node, expr)
+            token = take_token(&parser.lexer)
+            if token.type != .Semicolon do parse_error(parser, "Expected a semicolon after 'return' statement.", span_token(token))
+
+        case .IfKeyword:
+            take_token(&parser.lexer)
+            token = take_token(&parser.lexer)
+            if token.type != .LParen do parse_error(parser, "Expected a '(' before if condition.", span_token(token))
+            condition := parse_expression(parser)
+            token = take_token(&parser.lexer)
+            if token.type != .RParen do parse_error(parser, "Expected a ')' after if condition.", span_token(token))
+
+            if_true := parse_statement(parser)
+
+            token = look_ahead(&parser.lexer, 1)
+            if token.type == .ElseKeyword {
+                take_token(&parser.lexer)
+                if_false := parse_statement(parser)
+                result = make_node_3(If_Else_Node, condition, if_true, if_false)
+            }
+            else {
+                result = make_node_2(If_Node, condition, if_true)
+            }
+
+        case .GotoKeyword:
+            take_token(&parser.lexer)
+            token = take_token(&parser.lexer)
+            if token.type != .Ident do parse_error(parser, "Expected a label name after 'goto'.", span_token(token))
+            label := token.text
+            token = take_token(&parser.lexer)
+            if token.type != .Semicolon do parse_error(parser, "Expected a semicolon after 'goto' statement.", span_token(token))
+            result = make_node_1(Goto_Node, label)
+
+        case .WhileKeyword:
+            take_token(&parser.lexer)
+            token = take_token(&parser.lexer)
+            if token.type != .LParen do parse_error(parser, "Expected a '(' before loop condition.", span_token(token))
+            condition := parse_expression(parser)
+            token = take_token(&parser.lexer)
+            if token.type != .RParen do parse_error(parser, "Expected a ')' after loop condition.", span_token(token))
+            if_true := parse_statement(parser)
+            result = make_node_2(While_Node, condition, if_true)
+
+        case .DoKeyword:
+            take_token(&parser.lexer)
+            if_true := parse_statement(parser)
+            token = take_token(&parser.lexer)
+            if token.type != .WhileKeyword do parse_error(parser, "Expected a 'while' after 'do' loop body.", span_token(token))
+            token = take_token(&parser.lexer)
+            if token.type != .LParen do parse_error(parser, "Expected a '(' before loop condition.", span_token(token))
+            condition := parse_expression(parser)
+            token = take_token(&parser.lexer)
+            if token.type != .RParen do parse_error(parser, "Expected a ')' after loop condition.", span_token(token))
+            result = make_node_2(Do_While_Node, condition, if_true)
+            token = take_token(&parser.lexer)
+            if token.type != .Semicolon do parse_error(parser, "Expected a semicolon after 'do' loop.", span_token(token))
+
+        case .ForKeyword:
+            take_token(&parser.lexer)
+            token = take_token(&parser.lexer)
+            if token.type != .LParen do parse_error(parser, "Expected a '(' before loop conditions.", span_token(token))
+            pre_condition := parse_for_precondition(parser)
+
+            condition: ^Ast_Node = ---
+            token = look_ahead(&parser.lexer, 1)
+            if token.type == .Semicolon {
+                condition = make_node_1(Int_Constant_Node, 1) // If expression is empty, replace it with a condition that is always true
+            }
+            else {
+                condition = parse_expression(parser)
+            }
+            token = take_token(&parser.lexer)
+            if token.type != .Semicolon do parse_error(parser, "Expected a semicolon after 'for' loop condition.", span_token(token))
+
+            post_condition: ^Ast_Node
+            token = look_ahead(&parser.lexer, 1)
+            if token.type != .RParen {
+                post_condition = parse_expression(parser)
+            }
+
+            token = take_token(&parser.lexer)
+            if token.type != .RParen do parse_error(parser, "Expected a ')' after loop conditions.", span_token(token))
+            if_true := parse_statement(parser)
+            result = make_node_4(For_Node, pre_condition, condition, post_condition, if_true)
+
+        case .ContinueKeyword:
+            take_token(&parser.lexer)
+            token = take_token(&parser.lexer)
+            if token.type != .Semicolon do parse_error(parser, "Expected a semicolon after 'continue' statement.", span_token(token))
+            result = make_node_0(Continue_Node)
+
+        case .BreakKeyword:
+            take_token(&parser.lexer)
+            token = take_token(&parser.lexer)
+            if token.type != .Semicolon do parse_error(parser, "Expected a semicolon after 'break' statement.", span_token(token))
+            result = make_node_0(Break_Node)
+
+        case .SwitchKeyword:
+            take_token(&parser.lexer)
+            token = take_token(&parser.lexer)
+            if token.type != .LParen do parse_error(parser, "Expected a '(' before 'switch' expression.", span_token(token))
+            expr := parse_expression(parser)
+            token = take_token(&parser.lexer)
+            if token.type != .RParen do parse_error(parser, "Expected a ')' after 'switch' expression.", span_token(token))
+            block := parse_statement(parser) //@TODO: This is not correct. Switch bodiess must be compound statements
+            result = make_node_2(Switch_Node, expr, block)
+
+        case .Semicolon:
+            take_token(&parser.lexer)
+            result = make_node_0(Null_Statement_Node)
+
+        case .LBrace:
+            take_token(&parser.lexer)
+            statements := parse_block_item_list(parser)
+            result = make_node_1(Compound_Statement_Node, statements)
+
+        case:
+            result = parse_expression(parser)
+            token = take_token(&parser.lexer)
+            if token.type != .Semicolon do parse_error(parser, "Expected a semicolon after expression statement.", span_token(token))
+    }
+
+    result.labels = labels
+    return result
 }
 
 op_precs := map[Token_Type]int {
@@ -1050,153 +1175,6 @@ semantic_error :: proc(message: string) {
     os.exit(1)
 }
 
-parse_function_declaration :: proc(parser: ^Parser) -> ^Ast_Node {
-    title := parse_function_title(parser)
-
-    token := take_token(&parser.lexer)
-    if token.type != .Semicolon do parse_error(parser, "Expected a semicolon after function declaration.", span_token(token))
-    return make_node_2(Function_Declaration_Node, title.name, title.params)
-}
-
-parse_statement :: proc(parser: ^Parser, labels: [dynamic]Label = nil) -> ^Ast_Node {
-    labels := labels
-    if labels == nil {
-        labels = parse_labels(parser)
-    }
-    token := look_ahead(&parser.lexer, 1)
-
-    result: ^Ast_Node = ---
-
-    #partial switch token.type {
-        case .ReturnKeyword:
-            take_token(&parser.lexer)
-            expr := parse_expression(parser)
-            result = make_node_1(Return_Node, expr)
-            token = take_token(&parser.lexer)
-            if token.type != .Semicolon do parse_error(parser, "Expected a semicolon after 'return' statement.", span_token(token))
-
-        case .IfKeyword:
-            take_token(&parser.lexer)
-            token = take_token(&parser.lexer)
-            if token.type != .LParen do parse_error(parser, "Expected a '(' before if condition.", span_token(token))
-            condition := parse_expression(parser)
-            token = take_token(&parser.lexer)
-            if token.type != .RParen do parse_error(parser, "Expected a ')' after if condition.", span_token(token))
-
-            if_true := parse_statement(parser)
-
-            token = look_ahead(&parser.lexer, 1)
-            if token.type == .ElseKeyword {
-                take_token(&parser.lexer)
-                if_false := parse_statement(parser)
-                result = make_node_3(If_Else_Node, condition, if_true, if_false)
-            }
-            else {
-                result = make_node_2(If_Node, condition, if_true)
-            }
-
-        case .GotoKeyword:
-            take_token(&parser.lexer)
-            token = take_token(&parser.lexer)
-            if token.type != .Ident do parse_error(parser, "Expected a label name after 'goto'.", span_token(token))
-            label := token.text
-            token = take_token(&parser.lexer)
-            if token.type != .Semicolon do parse_error(parser, "Expected a semicolon after 'goto' statement.", span_token(token))
-            result = make_node_1(Goto_Node, label)
-
-        case .WhileKeyword:
-            take_token(&parser.lexer)
-            token = take_token(&parser.lexer)
-            if token.type != .LParen do parse_error(parser, "Expected a '(' before loop condition.", span_token(token))
-            condition := parse_expression(parser)
-            token = take_token(&parser.lexer)
-            if token.type != .RParen do parse_error(parser, "Expected a ')' after loop condition.", span_token(token))
-            if_true := parse_statement(parser)
-            result = make_node_2(While_Node, condition, if_true)
-
-        case .DoKeyword:
-            take_token(&parser.lexer)
-            if_true := parse_statement(parser)
-            token = take_token(&parser.lexer)
-            if token.type != .WhileKeyword do parse_error(parser, "Expected a 'while' after 'do' loop body.", span_token(token))
-            token = take_token(&parser.lexer)
-            if token.type != .LParen do parse_error(parser, "Expected a '(' before loop condition.", span_token(token))
-            condition := parse_expression(parser)
-            token = take_token(&parser.lexer)
-            if token.type != .RParen do parse_error(parser, "Expected a ')' after loop condition.", span_token(token))
-            result = make_node_2(Do_While_Node, condition, if_true)
-            token = take_token(&parser.lexer)
-            if token.type != .Semicolon do parse_error(parser, "Expected a semicolon after 'do' loop.", span_token(token))
-
-        case .ForKeyword:
-            take_token(&parser.lexer)
-            token = take_token(&parser.lexer)
-            if token.type != .LParen do parse_error(parser, "Expected a '(' before loop conditions.", span_token(token))
-            pre_condition := parse_for_precondition(parser)
-
-            condition: ^Ast_Node = ---
-            token = look_ahead(&parser.lexer, 1)
-            if token.type == .Semicolon {
-                condition = make_node_1(Int_Constant_Node, 1) // If expression is empty, replace it with a condition that is always true
-            }
-            else {
-                condition = parse_expression(parser)
-            }
-            token = take_token(&parser.lexer)
-            if token.type != .Semicolon do parse_error(parser, "Expected a semicolon after 'for' loop condition.", span_token(token))
-
-            post_condition: ^Ast_Node
-            token = look_ahead(&parser.lexer, 1)
-            if token.type != .RParen {
-                post_condition = parse_expression(parser)
-            }
-
-            token = take_token(&parser.lexer)
-            if token.type != .RParen do parse_error(parser, "Expected a ')' after loop conditions.", span_token(token))
-            if_true := parse_statement(parser)
-            result = make_node_4(For_Node, pre_condition, condition, post_condition, if_true)
-
-        case .ContinueKeyword:
-            take_token(&parser.lexer)
-            token = take_token(&parser.lexer)
-            if token.type != .Semicolon do parse_error(parser, "Expected a semicolon after 'continue' statement.", span_token(token))
-            result = make_node_0(Continue_Node)
-
-        case .BreakKeyword:
-            take_token(&parser.lexer)
-            token = take_token(&parser.lexer)
-            if token.type != .Semicolon do parse_error(parser, "Expected a semicolon after 'break' statement.", span_token(token))
-            result = make_node_0(Break_Node)
-
-        case .SwitchKeyword:
-            take_token(&parser.lexer)
-            token = take_token(&parser.lexer)
-            if token.type != .LParen do parse_error(parser, "Expected a '(' before 'switch' expression.", span_token(token))
-            expr := parse_expression(parser)
-            token = take_token(&parser.lexer)
-            if token.type != .RParen do parse_error(parser, "Expected a ')' after 'switch' expression.", span_token(token))
-            block := parse_statement(parser) //@TODO: This is not correct. Switch bodiess must be compound statements
-            result = make_node_2(Switch_Node, expr, block)
-
-        case .Semicolon:
-            take_token(&parser.lexer)
-            result = make_node_0(Null_Statement_Node)
-
-        case .LBrace:
-            take_token(&parser.lexer)
-            statements := parse_block_item_list(parser)
-            result = make_node_1(Compound_Statement_Node, statements)
-
-        case:
-            result = parse_expression(parser)
-            token = take_token(&parser.lexer)
-            if token.type != .Semicolon do parse_error(parser, "Expected a semicolon after expression statement.", span_token(token))
-    }
-
-    result.labels = labels
-    return result
-}
-
 parse_expression_leaf :: proc(parser: ^Parser) -> ^Ast_Node {
     token := look_ahead(&parser.lexer, 1)
 
@@ -1277,7 +1255,7 @@ parse_expression_leaf :: proc(parser: ^Parser) -> ^Ast_Node {
             parse_error(parser, "Expected an expression term.", span_token(token))
     }
 
-    panic("Unreachable")
+    unreachable()
 }
 
 parse_for_precondition :: proc(parser: ^Parser) -> ^Ast_Node {
@@ -1294,14 +1272,14 @@ parse_for_precondition :: proc(parser: ^Parser) -> ^Ast_Node {
             take_token(&parser.lexer)
             take_token(&parser.lexer)
             take_token(&parser.lexer)
-            statement = make_node_2(Decl_Node, var_name, bit_set[Storage_Specifier]{})
+            statement = make_node_2(Decl_Node, bit_set[Storage_Specifier]{}, var_name)
         }
         else if token_2.type == .Equal {
             take_token(&parser.lexer)
             take_token(&parser.lexer)
             take_token(&parser.lexer)
             right := parse_expression(parser)
-            statement = make_node_3(Decl_Assign_Node, var_name, right, bit_set[Storage_Specifier]{})
+            statement = make_node_3(Decl_Assign_Node, bit_set[Storage_Specifier]{}, var_name, right)
         }
         else {
             parse_error(parser, "Invalid 'for' loop precondition.", span_token(token)) //@TODO: Should this span the entire precondition?
@@ -1315,7 +1293,7 @@ parse_for_precondition :: proc(parser: ^Parser) -> ^Ast_Node {
         return parse_statement(parser) // @TODO: Statements are more than we need here.
     }
 
-    panic("Unreachable")
+    unreachable()
 }
 
 parse_postfix_operators :: proc(parser: ^Parser, inner: ^Ast_Node) -> ^Ast_Node {
@@ -1408,7 +1386,7 @@ get_offset :: proc(offsets: ^Scoped_Variable_Offsets, var_name: string) -> int {
             return offset
         }
     }
-    panic("Unreachable")
+    unreachable()
 }
 
 is_lvalue :: proc(info: ^Scoped_Validation_Info, lvalue: ^Ast_Node) -> bool {
@@ -1553,7 +1531,7 @@ validate_program :: proc(program: Program) {
                 }
 
             case:
-                panic("Unreachable")
+                unreachable()
         }
     }
 }
@@ -2311,7 +2289,7 @@ emit_block_item :: proc(builder: ^strings.Builder, block_item: ^Ast_Node, offset
         case Function_Declaration_Node: // Do nothing
 
         case Function_Definition_Node: // This is a semantic error, but will be caught in the validation step
-            panic("Unreachable")
+            unreachable()
 
         case:
             emit_statement(builder, block_item, offsets, info, function_name)
@@ -2445,7 +2423,7 @@ emit_statement :: proc(builder: ^strings.Builder, statement: ^Ast_Node, parent_o
                         fmt.sbprintfln(builder, "  jmp L%v", switch_info.start_label + i)
 
                     case string:
-                        panic("Unreachable")
+                        unreachable()
                 }
             }
             fmt.sbprintfln(builder, "  jmp L%v", switch_end_label(switch_info))
