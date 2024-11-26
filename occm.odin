@@ -686,8 +686,8 @@ parse_definition_or_declaration :: proc(parser: ^Parser) -> ^Ast_Node {
 
     if token.type != .Ident do parse_error(parser, "Expected an identifier", span_token(token))
     name := token.text
-    token = take_token(&parser.lexer)
-    #partial switch token.type {
+    token_after_name := take_token(&parser.lexer)
+    #partial switch token_after_name.type {
         case .Semicolon:
             return make_node_2(Decl_Node, storage_specifiers, name)
 
@@ -698,6 +698,7 @@ parse_definition_or_declaration :: proc(parser: ^Parser) -> ^Ast_Node {
             return make_node_3(Decl_Assign_Node, storage_specifiers, name, right)
 
         case .LParen:
+            if card(storage_specifiers) > 1 do parse_error(parser, "Function declarations can have at most one storage specifier", span_token(token))
             params := parse_function_params(parser)
             token = take_token(&parser.lexer)
             #partial switch token.type {
