@@ -633,7 +633,7 @@ Parser :: struct {
     lexer: Lexer,
 }
 
-matches_storage_specifier :: proc(type: Token_Type) -> bool {
+matches_linkage_specifier :: proc(type: Token_Type) -> bool {
     return type == .StaticKeyword || type == .ExternKeyword
 }
 
@@ -662,24 +662,24 @@ parse_program :: proc(parser: ^Parser) -> Program {
 parse_definition_or_declaration :: proc(parser: ^Parser) -> ^Ast_Node {
     token := take_token(&parser.lexer)
 
-    storage_specifiers: bit_set[Storage_Specifier]
+    linkage_specifiers: bit_set[Linkage_Specifier]
     has_type := false
-    for matches_storage_specifier(token.type) || token.type == .IntKeyword {
+    for matches_linkage_specifier(token.type) || token.type == .IntKeyword {
         defer token = take_token(&parser.lexer)
 
-        if matches_storage_specifier(token.type) {
+        if matches_linkage_specifier(token.type) {
             #partial switch token.type {
                 case .StaticKeyword:
-                    if .External in storage_specifiers {
+                    if .External in linkage_specifiers {
                         parse_error(parser, "Declarations cannot have both 'static' and 'extern' specifiers", span_token(token))
                     }
-                    storage_specifiers |= {.Internal}
+                    linkage_specifiers |= {.Internal}
 
                 case .ExternKeyword:
-                    if .Internal in storage_specifiers {
+                    if .Internal in linkage_specifiers {
                         parse_error(parser, "Declarations cannot have both 'static' and 'extern' specifiers", span_token(token))
                     }
-                    storage_specifiers |= {.External}
+                    linkage_specifiers |= {.External}
             }
         }
         else {
@@ -695,25 +695,25 @@ parse_definition_or_declaration :: proc(parser: ^Parser) -> ^Ast_Node {
     token_after_name := take_token(&parser.lexer)
     #partial switch token_after_name.type {
         case .Semicolon:
-            return make_node_2(Decl_Node, storage_specifiers, name)
+            return make_node_2(Decl_Node, linkage_specifiers, name)
 
         case .Equal:
             right := parse_expression(parser)
             token = take_token(&parser.lexer)
             if token.type != .Semicolon do parse_error(parser, "Expected a semicolon after variable declaration", span_token(token))
-            return make_node_3(Decl_Assign_Node, storage_specifiers, name, right)
+            return make_node_3(Decl_Assign_Node, linkage_specifiers, name, right)
 
         case .LParen:
-            if card(storage_specifiers) > 1 do parse_error(parser, "Function declarations can have at most one storage specifier", span_token(token))
+            if card(linkage_specifiers) > 1 do parse_error(parser, "Function declarations can have at most one storage specifier", span_token(token))
             params := parse_function_params(parser)
             token = take_token(&parser.lexer)
             #partial switch token.type {
                 case .Semicolon:
-                    return make_node_3(Function_Declaration_Node, storage_specifiers, name, params)
+                    return make_node_3(Function_Declaration_Node, linkage_specifiers, name, params)
 
                 case .LBrace:
                     body := parse_block_item_list(parser)
-                    return make_node_4(Function_Definition_Node, storage_specifiers, name, params, body)
+                    return make_node_4(Function_Definition_Node, linkage_specifiers, name, params, body)
 
                 case:
                     parse_error(parser, "Expected a ';' or '{'", span_token(token))
@@ -780,7 +780,7 @@ parse_block_item :: proc(parser: ^Parser) -> ^Ast_Node {
     token := look_ahead(&parser.lexer, 1)
 
     switch {
-        case matches_storage_specifier(token.type) || token.type == Token_Type.IntKeyword:
+        case matches_linkage_specifier(token.type) || token.type == Token_Type.IntKeyword:
             item := parse_definition_or_declaration(parser)
             #partial switch _ in item.variant {
                 case Decl_Node, Decl_Assign_Node, Function_Declaration_Node, Function_Definition_Node:
@@ -1279,14 +1279,14 @@ parse_for_precondition :: proc(parser: ^Parser) -> ^Ast_Node {
             take_token(&parser.lexer)
             take_token(&parser.lexer)
             take_token(&parser.lexer)
-            statement = make_node_2(Decl_Node, bit_set[Storage_Specifier]{}, var_name)
+            statement = make_node_2(Decl_Node, bit_set[Linkage_Specifier]{}, var_name)
         }
         else if token_2.type == .Equal {
             take_token(&parser.lexer)
             take_token(&parser.lexer)
             take_token(&parser.lexer)
             right := parse_expression(parser)
-            statement = make_node_3(Decl_Assign_Node, bit_set[Storage_Specifier]{}, var_name, right)
+            statement = make_node_3(Decl_Assign_Node, bit_set[Linkage_Specifier]{}, var_name, right)
         }
         else {
             parse_error(parser, "Invalid 'for' loop precondition.", span_token(token)) //@TODO: Should this span the entire precondition?
@@ -1413,12 +1413,12 @@ Object_Kind :: enum {
 }
 
 Variable_Type :: struct {
-    storage_specifiers: bit_set[Storage_Specifier],
+    linkage_specifiers: bit_set[Linkage_Specifier],
     type: string
 }
 
 Function_Type :: struct {
-    storage_specifiers: bit_set[Storage_Specifier],
+    linkage_specifiers: bit_set[Linkage_Specifier],
     return_type: string,
     param_count: int,
 }
@@ -1426,6 +1426,7 @@ Function_Type :: struct {
 Type_And_Validation_Info :: struct {
     control_flows: [dynamic]Containing_Control_Flow,
     defined_functions: map[string]struct{},
+    defined_global_vars: map[string]struct{},
 
     // NOTE: Function types are defined globally, even if declarations are in a non-global lexical scope
     function_types: map[string]Function_Type,
@@ -1460,29 +1461,34 @@ validate_program :: proc(program: Program) {
     info := Type_And_Validation_Info{
         make([dynamic]Containing_Control_Flow),
         make(map[string]struct{}),
-        make(map[string]Function_Type)
+        make(map[string]struct{}),
+        make(map[string]Function_Type),
     }
     defer delete(info.control_flows)
 
     for child in program.children {
         #partial switch c in child.variant {
             case Decl_Node:
+                if c.var_name in info.defined_global_vars do semantic_error("Duplicate definition of variable in global scope")
                 if kind, found := scoped_info.object_kinds[c.var_name]; found && kind == .Function {
                     semantic_error("Redeclaration of function as variable")
                 }
+                info.defined_global_vars[c.var_name] = {}
                 scoped_info.object_kinds[c.var_name] = .Variable
                 scoped_info.variable_types[c.var_name] = Variable_Type{
-                    c.storage_specifiers,
+                    c.linkage_specifiers,
                     "int", // @TODO: Types other than int
                 }
 
             case Decl_Assign_Node:
+                if c.var_name in info.defined_global_vars do semantic_error("Duplicate definition of variable in global scope")
                 if kind, found := scoped_info.object_kinds[c.var_name]; found && kind == .Function {
                     semantic_error("Redeclaration of function as variable")
                 }
+                info.defined_global_vars[c.var_name] = {}
                 scoped_info.object_kinds[c.var_name] = .Variable
                 scoped_info.variable_types[c.var_name] = Variable_Type{
-                    c.storage_specifiers,
+                    c.linkage_specifiers,
                     "int", // @TODO: Types other than int
                 }
 
@@ -1491,10 +1497,10 @@ validate_program :: proc(program: Program) {
                     semantic_error("Redeclaration of function as variable")
                 }
                 if contains_duplicate(c.params[:]) do semantic_error("Duplicate function parameters not allowed")
-                if has_conflicting_function_type(&info, c.name, len(c.params)) do semantic_error("Conflicting function types")
+                if has_conflicting_function_type(&info, c.linkage_specifiers, c.name, len(c.params)) do semantic_error("Conflicting function types")
                 scoped_info.object_kinds[c.name] = .Function
                 info.function_types[c.name] = Function_Type{
-                    c.storage_specifiers,
+                    c.linkage_specifiers,
                     "int", // @TODO: Types other than int
                     len(c.params),
                 }
@@ -1506,11 +1512,11 @@ validate_program :: proc(program: Program) {
                 if contains_duplicate(c.params[:]) do semantic_error("Duplicate function parameters not allowed")
                 if c.name in info.defined_functions do semantic_error("Duplicate definition of function with the same name")
                 info.defined_functions[c.name] = {}
-                if has_conflicting_function_type(&info, c.name, len(c.params)) do semantic_error("Conflicting function types")
+                if has_conflicting_function_type(&info, c.linkage_specifiers, c.name, len(c.params)) do semantic_error("Conflicting function types")
                 labels := validate_and_gather_function_labels(c)
                 scoped_info.object_kinds[c.name] = .Function
                 info.function_types[c.name] = Function_Type{
-                    c.storage_specifiers,
+                    c.linkage_specifiers,
                     "int", // @TODO: Types other than int
                     len(c.params),
                 }
@@ -1548,10 +1554,12 @@ get_object_kind :: proc(scoped_info: ^Scoped_Type_And_Validation_Info, name: str
     return nil, false
 }
 
-has_conflicting_function_type :: proc(info: ^Type_And_Validation_Info, name: string, param_count: int) -> bool {
+has_conflicting_function_type :: proc(info: ^Type_And_Validation_Info, linkage_specifiers: bit_set[Linkage_Specifier], name: string, param_count: int) -> bool {
     type, found := info.function_types[name]
     if !found do return false
-    else do return type.param_count != param_count
+    else {
+        return type.param_count != param_count || type.linkage_specifiers != linkage_specifiers
+    }
 }
 
 validate_block_item :: proc(block_item: ^Ast_Node, info: ^Type_And_Validation_Info, scoped_info: ^Scoped_Type_And_Validation_Info, labels: []Label) {
@@ -1567,7 +1575,7 @@ validate_block_item :: proc(block_item: ^Ast_Node, info: ^Type_And_Validation_In
             }
             scoped_info.object_kinds[item.var_name] = .Variable
             scoped_info.variable_types[item.var_name] = Variable_Type{
-                item.storage_specifiers,
+                item.linkage_specifiers,
                 "int", // @TODO: Types other than int
             }
             validate_expr(item.right, info, scoped_info)
@@ -1583,7 +1591,7 @@ validate_block_item :: proc(block_item: ^Ast_Node, info: ^Type_And_Validation_In
             }
             scoped_info.object_kinds[item.var_name] = .Variable
             scoped_info.variable_types[item.var_name] = Variable_Type{
-                item.storage_specifiers,
+                item.linkage_specifiers,
                 "int", // @TODO: Types other than int
             }
 
@@ -1591,10 +1599,10 @@ validate_block_item :: proc(block_item: ^Ast_Node, info: ^Type_And_Validation_In
             if kind, found := scoped_info.object_kinds[item.name]; found && kind == .Variable {
                 semantic_error("Function names must be distinct from variable names")
             }
-            if has_conflicting_function_type(info, item.name, len(item.params)) do semantic_error("Conflicting function types")
+            if has_conflicting_function_type(info, item.linkage_specifiers, item.name, len(item.params)) do semantic_error("Conflicting function types")
             scoped_info.object_kinds[item.name] = .Function
             info.function_types[item.name] = Function_Type{
-                item.storage_specifiers,
+                item.linkage_specifiers,
                 "int", // @TODO: Types other than int
                 len(item.params),
             }
