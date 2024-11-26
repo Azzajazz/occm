@@ -670,9 +670,15 @@ parse_definition_or_declaration :: proc(parser: ^Parser) -> ^Ast_Node {
         if matches_storage_specifier(token.type) {
             #partial switch token.type {
                 case .StaticKeyword:
+                    if .External in storage_specifiers {
+                        parse_error(parser, "Declarations cannot have both 'static' and 'extern' specifiers", span_token(token))
+                    }
                     storage_specifiers |= {.Internal}
 
                 case .ExternKeyword:
+                    if .Internal in storage_specifiers {
+                        parse_error(parser, "Declarations cannot have both 'static' and 'extern' specifiers", span_token(token))
+                    }
                     storage_specifiers |= {.External}
             }
         }
