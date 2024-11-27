@@ -1429,6 +1429,7 @@ Type_And_Validation_Info :: struct {
 
     // NOTE: Function types are defined globally, even if declarations are in a non-global lexical scope
     function_types: map[string]Function_Type,
+    extern_symbols: map[string]struct{},
 }
 
 Scoped_Type_And_Validation_Info :: struct {
@@ -1453,6 +1454,23 @@ delete_scoped_type_and_validation_info :: proc(scoped_info: ^Scoped_Type_And_Val
     free(scoped_info)
 }
 
+add_variable_with_type :: proc(scoped_info: ^Scoped_Type_And_Validation_Info, name: string, linkage: Linkage, type: string) {
+    scoped_info.object_kinds[name] = .Variable
+    scoped_info.variable_types[name] = Variable_Type{
+        linkage,
+        type,
+    }
+}
+
+add_function_with_type :: proc(scoped_info: ^Scoped_Type_And_Validation_Info, info: ^Type_And_Validation_Info, name: string, linkage: Linkage, return_type: string, param_count: int) {
+    scoped_info.object_kinds[name] = .Function
+    info.function_types[name] = Function_Type{
+        linkage,
+        return_type,
+        param_count,
+    }
+}
+
 validate_program :: proc(program: Program) {
     scoped_info := make_scoped_type_and_validation_info(nil)
     defer delete_scoped_type_and_validation_info(scoped_info)
@@ -1462,6 +1480,7 @@ validate_program :: proc(program: Program) {
         make(map[string]struct{}),
         make(map[string]struct{}),
         make(map[string]Function_Type),
+        make(map[string]struct{}),
     }
     defer delete(info.control_flows)
 
@@ -1473,11 +1492,7 @@ validate_program :: proc(program: Program) {
                     semantic_error("Redeclaration of function as variable")
                 }
                 info.defined_global_vars[c.var_name] = {}
-                scoped_info.object_kinds[c.var_name] = .Variable
-                scoped_info.variable_types[c.var_name] = Variable_Type{
-                    c.linkage,
-                    "int", // @TODO: Types other than int
-                }
+                add_variable_with_type(scoped_info, c.var_name, c.linkage, "int")
 
             case Decl_Assign_Node:
                 if c.var_name in info.defined_global_vars do semantic_error("Duplicate definition of variable in global scope")
@@ -1485,11 +1500,7 @@ validate_program :: proc(program: Program) {
                     semantic_error("Redeclaration of function as variable")
                 }
                 info.defined_global_vars[c.var_name] = {}
-                scoped_info.object_kinds[c.var_name] = .Variable
-                scoped_info.variable_types[c.var_name] = Variable_Type{
-                    c.linkage,
-                    "int", // @TODO: Types other than int
-                }
+                add_variable_with_type(scoped_info, c.var_name, c.linkage, "int")
 
             case Function_Declaration_Node:
                 if kind, found := scoped_info.object_kinds[c.name]; found && kind == .Variable {
@@ -1497,12 +1508,7 @@ validate_program :: proc(program: Program) {
                 }
                 if contains_duplicate(c.params[:]) do semantic_error("Duplicate function parameters not allowed")
                 if has_conflicting_function_type(&info, c.linkage, c.name, len(c.params)) do semantic_error("Conflicting function types")
-                scoped_info.object_kinds[c.name] = .Function
-                info.function_types[c.name] = Function_Type{
-                    c.linkage,
-                    "int", // @TODO: Types other than int
-                    len(c.params),
-                }
+                add_function_with_type(scoped_info, &info, c.name, c.linkage, "int", len(c.params))
 
             case Function_Definition_Node:
                 if kind, found := scoped_info.object_kinds[c.name]; found && kind == .Variable {
@@ -1513,21 +1519,12 @@ validate_program :: proc(program: Program) {
                 info.defined_functions[c.name] = {}
                 if has_conflicting_function_type(&info, c.linkage, c.name, len(c.params)) do semantic_error("Conflicting function types")
                 labels := validate_and_gather_function_labels(c)
-                scoped_info.object_kinds[c.name] = .Function
-                info.function_types[c.name] = Function_Type{
-                    c.linkage,
-                    "int", // @TODO: Types other than int
-                    len(c.params),
-                }
+                add_function_with_type(scoped_info, &info, c.name, c.linkage, "int", len(c.params))
 
                 new_scoped_info := make_scoped_type_and_validation_info(scoped_info)
                 defer delete_scoped_type_and_validation_info(new_scoped_info)
                 for param in c.params {
-                    new_scoped_info.object_kinds[param] = .Variable
-                    new_scoped_info.variable_types[param] = Variable_Type{
-                        nil,
-                        "int", // @TODO: Types other than int
-                    }
+                    add_variable_with_type(new_scoped_info, param, .None, "int")
                 }
 
                 for block_item in c.body {
@@ -1572,11 +1569,7 @@ validate_block_item :: proc(block_item: ^Ast_Node, info: ^Type_And_Validation_In
                     semantic_error("Variable names must be distinct from function names")
                 }
             }
-            scoped_info.object_kinds[item.var_name] = .Variable
-            scoped_info.variable_types[item.var_name] = Variable_Type{
-                item.linkage,
-                "int", // @TODO: Types other than int
-            }
+            add_variable_with_type(scoped_info, item.var_name, item.linkage, "int")
             validate_expr(item.right, info, scoped_info)
 
         case Decl_Node: // Space on the stack is already allocated by emit_function
@@ -1588,23 +1581,14 @@ validate_block_item :: proc(block_item: ^Ast_Node, info: ^Type_And_Validation_In
                     semantic_error("Variable names must be distinct from function names")
                 }
             }
-            scoped_info.object_kinds[item.var_name] = .Variable
-            scoped_info.variable_types[item.var_name] = Variable_Type{
-                item.linkage,
-                "int", // @TODO: Types other than int
-            }
+            add_variable_with_type(scoped_info, item.var_name, item.linkage, "int")
 
         case Function_Declaration_Node:
             if kind, found := scoped_info.object_kinds[item.name]; found && kind == .Variable {
                 semantic_error("Function names must be distinct from variable names")
             }
             if has_conflicting_function_type(info, item.linkage, item.name, len(item.params)) do semantic_error("Conflicting function types")
-            scoped_info.object_kinds[item.name] = .Function
-            info.function_types[item.name] = Function_Type{
-                item.linkage,
-                "int", // @TODO: Types other than int
-                len(item.params),
-            }
+            add_function_with_type(scoped_info, info, item.name, item.linkage, "int", len(item.params))
 
         case Function_Definition_Node:
             semantic_error("Function definitions cannot be nested in scopes")
